@@ -11,7 +11,20 @@ const SubAdmin = () => {
     const [usersList, setUsersList] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [currentUser, setCurrentUser] = useState({ name: 'Mentor', domain: '', designation: 'Mentor' });
+    const [currentUser, setCurrentUser] = useState(() => {
+        const stored = localStorage.getItem('currentUser');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            return { 
+                name: parsed.username, 
+                username: parsed.username, 
+                domain: parsed.domain || '', 
+                role: parsed.role || '',
+                designation: parsed.designation || 'Mentor'
+            };
+        }
+        return { name: 'Mentor', username: 'Mentor', domain: '', role: '', designation: 'Mentor' };
+    });
     const [domainStats, setDomainStats] = useState({ newUsers: '--', activity: '--' });
     const [tasks, setTasks] = useState([]);
     const [taskMenuOpen, setTaskMenuOpen] = useState(false);
@@ -32,13 +45,14 @@ const SubAdmin = () => {
 
     const handleLogout = async () => {
         try {
-            if (currentUser && currentUser.name) {
+            const username = currentUser.username || currentUser.name;
+            if (username) {
                 // Record logout activity
                 await fetch(`${API_BASE_URL}/activity`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        username: currentUser.name,
+                        username: username,
                         action: 'logout',
                         app_url: 'Mentor Dashboard'
                     }),
@@ -47,7 +61,7 @@ const SubAdmin = () => {
                 await fetch(`${API_BASE_URL}/api/logout`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ username: currentUser.name }),
+                    body: JSON.stringify({ username: username }),
                 });
             }
         } catch (error) {
@@ -76,13 +90,22 @@ const SubAdmin = () => {
             if (!response.ok) throw new Error(`Failed to fetch reports`);
 
             const data = await response.json();
-            setReportsData(data);
+            const mentorDomain = currentUser.domain;
+            const adminRole = currentUser.role;
+            const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+            
+            const domainReports = isSpecialDomain ? data : data.filter(r => (r.domain || r.Domain) === mentorDomain);
+            
+            setReportsData(domainReports);
             setCurrentView(reportType === 'weekly' ? 'weekly-reports' : 'daily-reports');
 
             pollingIntervalRef.current = setInterval(async () => {
                 try {
                     const res = await fetch(`${API_BASE_URL}/api/${endpoint}`);
-                    if (res.ok) setReportsData(await res.json());
+                    if (res.ok) {
+                        const updatedReports = await res.json();
+                        setReportsData(isSpecialDomain ? updatedReports : updatedReports.filter(r => (r.domain || r.Domain) === mentorDomain));
+                    }
                 } catch (err) { console.warn(err); }
             }, 3000);
 
@@ -102,7 +125,11 @@ const SubAdmin = () => {
             });
             if (response.ok) {
                 const data = await response.json();
-                setUsersList(data);
+                const mentorDomain = currentUser.domain;
+                const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management';
+                
+                const filteredUsers = isSpecialDomain ? data : data.filter(u => u.domain === mentorDomain);
+                setUsersList(filteredUsers);
             }
         } catch (err) {
             console.warn("Real-time polling error for users:", err);
@@ -132,32 +159,71 @@ const SubAdmin = () => {
                 fetch(`${API_BASE_URL}/api/logs`)
             ]);
 
-            const storedUser = JSON.parse(localStorage.getItem('currentUser'));
-            const mentorDomain = storedUser?.domain || currentUser.domain;
+            const mentorDomain = currentUser.domain;
 
-            if (uRes.ok) {
-                const allUsers = await uRes.json();
-                setUsersList(allUsers);
+            let usersWithActivity = [];
+            if (uRes.ok && lRes.ok) {
+                const allUsers = await uRes.json() || [];
+                const allLogs = await lRes.json() || [];
+                
+                // Filter logs to show only those in the mentor's domain (case-insensitive)
+                const domainLogs = allLogs.filter(log => {
+                    const logDomain = (log.domain || log.Domain || '').toLowerCase();
+                    const mDomain = (mentorDomain || '').toLowerCase();
+                    return !mentorDomain || mDomain === 'xyz' || logDomain === mDomain;
+                });
+                setActivities(domainLogs);
+
+                // Combine user data with their latest log activity
+                const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management';
+                const domainUsers = isSpecialDomain ? allUsers : allUsers.filter(u => {
+                    const uDomain = (u.domain || u.Domain || '').toLowerCase();
+                    const mDomain = (mentorDomain || '').toLowerCase();
+                    return uDomain === mDomain;
+                });
+
+                usersWithActivity = domainUsers.map(user => {
+                    // Find the latest login and logout logs for this specific user
+                    const userLogs = allLogs.filter(log => log.username?.trim().toLowerCase() === user.username?.trim().toLowerCase());
+                    const lastLogin = userLogs.slice().reverse().find(log => log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in')));
+                    const lastLogout = userLogs.slice().reverse().find(log => log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed')));
+
+                    return {
+                        ...user,
+                        login_time: lastLogin ? (lastLogin.login_time || lastLogin.timestamp) : null,
+                        logout_time: lastLogout ? (lastLogout.logout_time || lastLogout.timestamp) : null
+                    };
+                });
+
+                setUsersList(usersWithActivity);
 
                 if (mentorDomain && mentorDomain !== 'Domain Mentor') {
-                    const domainUsers = allUsers.filter(u => u.domain === mentorDomain);
-                    const activeDomainUsers = domainUsers.filter(u => u.status === 'Active').length;
-                    const activityPercentage = domainUsers.length > 0 ? Math.round((activeDomainUsers / domainUsers.length) * 100) : 0;
+                    const activeCount = domainUsers.filter(u => u.status === 'Active').length;
+                    const activityPercentage = domainUsers.length > 0 ? Math.round((activeCount / domainUsers.length) * 100) : 0;
 
                     setDomainStats({
-                        newUsers: activeDomainUsers,
+                        newUsers: activeCount,
                         activity: `${activityPercentage}%`
                     });
                 }
+            } else if (uRes.ok) {
+                const allUsers = await uRes.json() || [];
+                const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management';
+                const domainUsers = isSpecialDomain ? allUsers : allUsers.filter(u => {
+                    const uDomain = (u.domain || u.Domain || '').toLowerCase();
+                    const mDomain = (mentorDomain || '').toLowerCase();
+                    return uDomain === mDomain;
+                });
+                setUsersList(domainUsers);
             }
 
-            if (rRes.ok) setReportsData(await rRes.json());
-
-            if (lRes.ok) {
-                const allLogs = await lRes.json();
-                // Filter logs to show only those in the mentor's domain
-                const domainLogs = allLogs.filter(log => log.domain === mentorDomain);
-                setActivities(domainLogs);
+            if (rRes.ok) {
+                const reports = await rRes.json() || [];
+                setReportsData(mentorDomain ? reports.filter(r => {
+                    const rDomain = (r.domain || r.Domain || '').toLowerCase();
+                    const mDomain = (mentorDomain || '').toLowerCase();
+                    return rDomain === mDomain;
+                }) : reports);
             }
         } catch (err) {
             console.warn("Dashboard polling error:", err);
@@ -456,20 +522,27 @@ const SubAdmin = () => {
                                         className="bg-blue-600 rounded-xl p-5 text-white shadow-lg shadow-blue-200 relative overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform"
                                     >
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
-                                        <div className="relative z-10 flex items-center justify-between">
-                                            <div className="flex gap-4">
-                                                <div className="p-3 bg-white/20 rounded-lg h-fit">
-                                                    <UsersIcon size={28} />
+                                        <div className="relative z-10 flex items-center">
+                                            <div className="p-3 bg-white/20 rounded-lg h-fit mr-4">
+                                                <UsersIcon size={28} />
+                                            </div>
+                                            <div className="flex gap-8 items-center flex-1">
+                                                <div className="flex-1">
+                                                    <div className="flex items-baseline justify-between mb-1">
+                                                        <h3 className="text-xl font-bold">Users List</h3>
+                                                        <span className="text-2xl font-bold text-white/40 ml-4">{usersList.length || '0'}</span>
+                                                    </div>
+                                                    <p className="text-blue-100 opacity-80 text-xs">Members in System</p>
                                                 </div>
-                                                <div>
-                                                    <h3 className="text-2xl font-bold">Users List</h3>
-                                                    <p className="text-blue-100 opacity-90 text-sm">Members in System</p>
-                                                    <h3 className="text-2xl font-bold">Domain Users</h3>
-                                                    <p className="text-blue-100 opacity-90 text-sm">Users in {currentUser.domain}</p>
+                                                <div className="w-px h-10 bg-white/20"></div>
+                                                <div className="flex-1">
+                                                    <div className="flex items-baseline justify-between mb-1">
+                                                        <h3 className="text-xl font-bold">Domain Users</h3>
+                                                        <span className="text-2xl font-bold text-white/40 ml-4">{usersList.filter(u => u.domain === currentUser.domain).length || '0'}</span>
+                                                    </div>
+                                                    <p className="text-blue-100 opacity-80 text-xs line-clamp-1">Users in {currentUser.domain}</p>
                                                 </div>
                                             </div>
-                                            <div className="text-4xl font-bold opacity-20">{usersList.length || '#'}</div>
-                                            <div className="text-4xl font-bold opacity-20">{usersList.filter(u => u.domain === currentUser.domain).length || '#'}</div>
                                         </div>
                                     </div>
 
@@ -479,10 +552,8 @@ const SubAdmin = () => {
                                             {/* <div className="text-5xl font-bold text-white/90">1</div> */}
                                             <div className="text-5xl font-bold text-white/90">{domainStats.newUsers}</div>
                                             <div>
-                                                <p className="font-bold leading-tight">New User</p>
-                                                <p className="text-amber-100 text-sm">Admins Ready</p>
-                                                <p className="font-bold leading-tight">Active Users</p>
-                                                <p className="text-amber-100 text-sm">In your domain</p>
+                                                <p className="font-bold leading-tight">New Users Activity</p>
+                                                <p className="font-bold leading-tight">as {currentUser.domain}</p>
                                             </div>
                                         </div>
                                         <div className="bg-green-500/90 backdrop-blur-sm px-4 py-2 rounded-lg shadow-sm">
@@ -493,7 +564,7 @@ const SubAdmin = () => {
                             </div>
 
                             {/* My Domain Users Table */}
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto mb-8">
                                 <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
                                     <h3 className="font-bold text-lg text-slate-800">My Domain Users</h3>
                                     <button className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600">
@@ -505,26 +576,32 @@ const SubAdmin = () => {
                                     <table className="w-full text-sm text-left">
                                         <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                                             <tr>
-                                                <th className="px-6 py-4">Name</th>
+                                                <th className="px-6 py-4 whitespace-nowrap">ID</th>
+                                                <th className="px-6 py-4 whitespace-nowrap">Name</th>
                                                 <th className="px-6 py-4">Email</th>
-                                                <th className="px-6 py-4">Last Active</th>
+                                                <th className="px-6 py-4">Domain</th>
+                                                <th className="px-6 py-4">Login Time</th>
+                                                <th className="px-6 py-4">Logout Time</th>
                                                 <th className="px-6 py-4 text-center">Status</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {usersList.filter(u => u.domain === currentUser.domain).length === 0 ? (
+                                            {usersList.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan="4" className="px-6 py-8 text-center text-slate-400">
+                                                    <td colSpan="7" className="px-6 py-8 text-center text-slate-400">
                                                         No users found in your domain ({currentUser.domain}).
                                                     </td>
                                                 </tr>
                                             ) : (
-                                                usersList.filter(u => u.domain === currentUser.domain).slice(0, 5).map((user) => (
+                                                usersList.slice(0, 5).map((user) => (
                                                     <UserRow
                                                         key={user.id}
+                                                        id={user.custom_id || user.id}
                                                         name={user.username}
                                                         email={user.email || 'No email'}
-                                                        active="Today"
+                                                        domain={user.domain || user.Domain || 'No domain'}
+                                                        loginTime={user.login_time}
+                                                        logoutTime={user.logout_time}
                                                         status={user.status === 'Active' ? 'online' : 'offline'}
                                                     />
                                                 ))
@@ -553,8 +630,8 @@ const SubAdmin = () => {
                                             {(activities.length > 0 ? activities : []).slice(0, 5).map((log) => (
                                                 <ActivityRow
                                                     key={log.id}
-                                                    date={log.login_time ? log.login_time.split('T')[0] : 'N/A'}
-                                                    time={log.login_time ? log.login_time.split('T')[1]?.split('.')[0] : 'N/A'}
+                                                    date={log.login_time ? new Date(log.login_time).toLocaleDateString('en-GB') : 'N/A'}
+                                                    time={log.login_time ? new Date(log.login_time).toLocaleTimeString() : 'N/A'}
                                                     activity={`${log.username}: ${log.action}`}
                                                     status={log.action.toLowerCase().includes('logged in') ? 'done' : 'pending'}
                                                 />
@@ -572,7 +649,7 @@ const SubAdmin = () => {
                             </div>
                         </>
                     ) : currentView === 'users' ? (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300">
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
                             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50/30">
                                 <div>
                                     <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -594,7 +671,7 @@ const SubAdmin = () => {
                                     <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
                                         <tr>
                                             <th className="px-6 py-4">ID</th>
-                                            <th className="px-6 py-4">Username</th>
+                                            <th className="px-6 py-4 whitespace-nowrap">Username</th>
                                             <th className="px-6 py-4">Role</th>
                                             <th className="px-6 py-4">Domain</th>
                                             <th className="px-6 py-4 text-center">Status</th>
@@ -617,7 +694,7 @@ const SubAdmin = () => {
                                                                 {user.username.charAt(0)}
                                                             </div>
                                                             <div>
-                                                                <p className="font-bold text-slate-800">{user.username}</p>
+                                                                <p className="font-bold text-slate-800 whitespace-nowrap">{user.username}</p>
                                                                 <p className="text-slate-400 text-xs">{user.email || 'No email'}</p>
                                                             </div>
                                                         </div>
@@ -960,7 +1037,7 @@ const SubAdmin = () => {
                                                         <p className="text-slate-700 font-medium">{report.name || report.createdBy}</p>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <div className="text-slate-600 font-medium">{report.date}</div>
+                                                        <div className="text-slate-600 font-medium">{report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}</div>
                                                     </td>
                                                     <td className="px-6 py-4 text-slate-400 italic text-xs">
                                                         {report.day}
@@ -1022,11 +1099,14 @@ const SidebarItem = ({ icon, label, active, onClick, hasSubmenu, isOpen, childre
     );
 };
 
-const UserRow = ({ name, email, active, status }) => (
+const UserRow = ({ id, name, email, domain, loginTime, logoutTime, status }) => (
     <tr className="hover:bg-slate-50 transition-colors">
-        <td className="px-6 py-4 font-semibold text-slate-700">{name}</td>
+        <td className="px-6 py-4 font-mono text-xs text-slate-500">{id}</td>
+        <td className="px-6 py-4 font-semibold text-slate-700 whitespace-nowrap">{name}</td>
         <td className="px-6 py-4 text-slate-500">{email}</td>
-        <td className="px-6 py-4 text-slate-500">{active}</td>
+        <td className="px-6 py-4 text-slate-500">{domain}</td>
+        <td className="px-6 py-4 text-slate-500 text-xs">{loginTime ? new Date(loginTime).toLocaleTimeString('en-GB') : 'N/A'}</td>
+        <td className="px-6 py-4 text-slate-500 text-xs">{logoutTime ? new Date(logoutTime).toLocaleTimeString('en-GB') : 'N/A'}</td>
         <td className="px-6 py-4 text-center">
             <span className={`inline-block w-3 h-3 rounded-full ${status === 'online' ? 'bg-green-500 shadow-sm shadow-green-300' : 'bg-slate-300'}`}></span>
         </td>

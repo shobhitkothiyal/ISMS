@@ -16,7 +16,7 @@ const SuperAdmin = () => {
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState(null);
   const [showReportForm, setShowReportForm] = useState(null); // 'daily' or 'weekly'
-  const [currentUser, setCurrentUser] = useState({ name: 'Super Admin', domain: 'xyz' });
+  const [currentUser, setCurrentUser] = useState({ name: 'Super Admin', username: 'Super Admin', domain: 'xyz' });
   const [editingData, setEditingData] = useState(null);
   const [monthlyReportData, setMonthlyReportData] = useState([]);
   const [showMonthlyReportTable, setShowMonthlyReportTable] = useState(false);
@@ -40,32 +40,37 @@ const SuperAdmin = () => {
     weeklySummary: "",
   });
 
-  const handleLogout = async () => {
-    try {
-      if (currentUser && currentUser.name) {
-        // Record logout activity
-        await fetch(`${API_BASE_URL}/activity`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: currentUser.name,
-            action: 'logout',
-            app_url: 'Super Admin Dashboard'
-          }),
-        });
+ const handleLogout = async () => {
+  try {
+    if (!currentUser?.username) return;
 
-        await fetch(`${API_BASE_URL}/api/logout`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: currentUser.name }),
-        });
-      }
-    } catch (error) {
-      console.error("Logout failed:", error);
+    console.log("Logging out user:", currentUser.username);
+
+    // Call logout API FIRST
+    const response = await fetch(`${API_BASE_URL}/api/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: currentUser.username
+      }),
+    });
+
+    const result = await response.json();
+    console.log("Logout API response:", result);
+
+    if (!response.ok) {
+      console.error("Logout failed on backend");
+      return;
     }
+
+    // Only after success, clear localStorage and navigate
     localStorage.removeItem("currentUser");
     navigate("/");
-  };
+
+  } catch (error) {
+    console.error("Logout failed:", error);
+  }
+};
 
   const handleSetActiveView = (view) => {
     navigate(`/super-admin/${view === 'dashboard' ? '' : view}`);
@@ -90,20 +95,29 @@ const SuperAdmin = () => {
       fetch(`${API_BASE_URL}/api/logs`).then((res) => res.json()),
     ])
       .then(([adminsData, usersData, logsDataResponse]) => {
-        setMonthlyReportData(usersData);
-        setLogsData(logsDataResponse || []);
-        const activeEmployees = usersData.filter((e) => e.status === "Active").length;
-        const avgActivity = usersData.length > 0
-          ? Math.round((activeEmployees / usersData.length) * 100)
+        const storedUser = JSON.parse(localStorage.getItem('currentUser'));
+        const adminDomain = currentUser.domain || storedUser?.domain;
+        const adminRole = currentUser.role || storedUser?.role;
+        const isAdminName = currentUser.username || currentUser.name || storedUser?.username;
+        const isSpecialDomain = !adminDomain || adminDomain === 'xyz' || adminDomain === 'Admin' || adminDomain === 'Super Admin' || adminDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+        const filteredAdmins = isSpecialDomain ? adminsData : adminsData.filter(a => (a.domain || a.Domain) === adminDomain);
+        const filteredUsers = isSpecialDomain ? usersData : usersData.filter(u => (u.domain || u.Domain) === adminDomain);
+        const filteredLogs = isSpecialDomain ? (logsDataResponse || []) : (logsDataResponse || []).filter(l => l.domain === adminDomain);
+
+        setMonthlyReportData(filteredUsers);
+        setLogsData(filteredLogs);
+        const activeEmployees = filteredUsers.filter((e) => e.status === "Active").length;
+        const avgActivity = filteredUsers.length > 0
+          ? Math.round((activeEmployees / filteredUsers.length) * 100)
           : 0;
 
         setDashboardStats((prev) => ({
           ...prev,
-          totalUsers: usersData.length,
-          totalAdmins: adminsData.length,
-          averageActivity: avgActivity + "%",
-          topDomain: usersData.length > 0
-            ? [...usersData].sort((a, b) => (b.department || "").localeCompare(a.department || ""))[0]?.department
+          totalUsers: filteredUsers.length,
+          totalAdmins: filteredAdmins.length,
+          averageActivity: `${avgActivity}%`,
+          topDomain: filteredUsers.length > 0
+            ? [...filteredUsers].sort((a, b) => (b.department || "").localeCompare(a.department || ""))[0]?.department
             : "--",
           overallProductivity: activeEmployees > 0 ? "Good" : "Pending",
         }));
@@ -159,7 +173,9 @@ const SuperAdmin = () => {
       const parsedUser = JSON.parse(storedUser);
       setCurrentUser(prev => ({
         ...prev,
+        username: parsedUser.username,
         name: parsedUser.username,
+        role: parsedUser.role || '',
         domain: parsedUser.domain || prev.domain,
         designation: parsedUser.designation || ''
       }));
@@ -180,11 +196,15 @@ const SuperAdmin = () => {
       }
 
       const data = await response.json();
+      const adminDomain = currentUser.domain;
+      const adminRole = currentUser.role;
+      const isSpecialDomain = !adminDomain || adminDomain === 'xyz' || adminDomain === 'Admin' || adminDomain === 'Super Admin' || adminDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+      const filteredData = isSpecialDomain ? data : data.filter(r => r.domain === adminDomain);
 
       if (reportType === "daily") {
-        setDailyReports(data);
+        setDailyReports(filteredData);
       } else if (reportType === "weekly") {
-        setWeeklyReports(data);
+        setWeeklyReports(filteredData);
       }
     } catch (error) {
       console.error(`Error fetching ${reportType} reports: `, error);
@@ -220,6 +240,8 @@ const SuperAdmin = () => {
         mobileNumber: reportFormData.mobileNumber || "",
         email: reportFormData.email || "",
         type: showReportForm.charAt(0).toUpperCase() + showReportForm.slice(1),
+        domain: currentUser.domain !== 'xyz' ? currentUser.domain : "All",
+        Designation: toTitleCase(reportFormData.designation) || "Staff",
       };
 
       // Use separate endpoint based on report type
@@ -677,7 +699,7 @@ const SuperAdmin = () => {
                           <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
                             <tr>
                               <th className="px-4 py-3">User ID</th>
-                              <th className="px-4 py-3">Name</th>
+                              <th className="px-4 py-3 w-full whitespace-nowrap">Name</th>
                               <th className="px-4 py-3">Designation</th>
                               <th className="px-4 py-3">Domain</th>
                               <th className="px-4 py-3">Activity Score</th>
@@ -692,7 +714,7 @@ const SuperAdmin = () => {
                               monthlyReportData.map((user, idx) => (
                                 <tr key={user.id || idx} className="hover:bg-slate-50">
                                   <td className="px-4 py-3 font-mono text-xs">{user.custom_id || user.id || 'N/A'}</td>
-                                  <td className="px-4 py-3 font-medium text-slate-800">{user.username}</td>
+                                  <td className="px-4 py-3 font-medium text-slate-800 w-full whitespace-nowrap">{user.username}</td>
                                   <td className="px-4 py-3 text-slate-600">{user.employmentType || user.role || 'N/A'}</td>
                                   <td className="px-4 py-3 text-slate-600">{user.domain || 'N/A'}</td>
                                   <td className="px-4 py-3 text-slate-600">{user.status === 'Active' ? Math.floor(Math.random() * (100 - 70 + 1) + 70) : 0}</td>
@@ -714,7 +736,7 @@ const SuperAdmin = () => {
               </div>
 
               {/* Recent Log Activity Section - Super Admin Dashboard */}
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto mb-8">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/10">
                   <h3 className="font-bold text-lg text-slate-800">Recent Log Activity</h3>
                   <button onClick={() => handleSetActiveView('logs-audit')} className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-blue-600 flex items-center gap-2 hover:bg-slate-50 font-bold uppercase tracking-wider">
@@ -730,7 +752,7 @@ const SuperAdmin = () => {
                         <th className="px-6 py-4">Date</th>
                         <th className="px-6 py-4">Login Time</th>
                         <th className="px-6 py-4">Logout Time</th>
-                        <th className="px-6 py-4">Username</th>
+                        <th className="px-6 py-4 whitespace-nowrap">Username</th>
                         <th className="px-6 py-4">Designation</th>
                         <th className="px-6 py-4">Email</th>
                         <th className="px-6 py-4">Domain</th>
@@ -786,6 +808,7 @@ const SuperAdmin = () => {
             <AdminList
               onCreateNew={() => { setEditingData(null); handleSetActiveView("create-admin"); }}
               onEdit={(admin) => { setEditingData(admin); handleSetActiveView("create-admin"); }}
+              currentUser={currentUser}
             />
           )}
 
@@ -799,6 +822,7 @@ const SuperAdmin = () => {
             <UserList
               onCreateNew={() => { setEditingData(null); handleSetActiveView("create-user"); }}
               onEdit={(user) => { setEditingData(user); handleSetActiveView("create-user"); }}
+              currentUser={currentUser}
             />
           )}
 
@@ -1150,7 +1174,7 @@ const CreateUserForm = ({ onViewList, initialData }) => {
         email: initialData.email,
         password: "",
         userId: initialData.custom_id || "",
-        role: initialData.role || "",
+        role: initialData.role || "User",
         Domain: initialData.domain || initialData.Domain || "",
         designation: initialData.designation || "",
       });
@@ -1350,7 +1374,7 @@ const CreateUserForm = ({ onViewList, initialData }) => {
 };
 
 // Admin List Component
-const AdminList = ({ onCreateNew, onEdit }) => {
+const AdminList = ({ onCreateNew, onEdit, currentUser }) => {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1364,7 +1388,11 @@ const AdminList = ({ onCreateNew, onEdit }) => {
     fetch(`${API_BASE_URL}/api/admins`)
       .then((res) => res.json())
       .then((data) => {
-        setAdmins(data);
+        const adminDomain = currentUser?.domain;
+        const adminRole = currentUser?.role;
+        const isSpecialDomain = !adminDomain || adminDomain === 'xyz' || adminDomain === 'Admin' || adminDomain === 'Super Admin' || adminDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+        const filtered = isSpecialDomain ? data : data.filter(a => (a.domain || a.Domain) === adminDomain);
+        setAdmins(filtered);
         setLoading(false);
       })
       .catch((err) => {
@@ -1414,12 +1442,12 @@ const AdminList = ({ onCreateNew, onEdit }) => {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
             <tr>
               <th className="px-6 py-4">ID</th>
-              <th className="px-6 py-4">Admin Name</th>
+              <th className="px-6 py-4 w-full whitespace-nowrap">Admin Name</th>
               <th className="px-6 py-4">Email</th>
               <th className="px-6 py-4">Role</th>
               <th className="px-6 py-4">Domain</th>
@@ -1447,11 +1475,11 @@ const AdminList = ({ onCreateNew, onEdit }) => {
                   key={admin.id}
                   userId={admin.custom_id}
                   name={admin.username}
-                  email={admin.email}
-                  domain={admin.domain || "N/A"}
-                  role={admin.role}
                   designation={admin.designation}
+                  domain={admin.domain || "N/A"}
                   status={admin.status}
+                  email={admin.email}
+                  role={admin.role}
                   onEdit={() => onEdit(admin)}
                   onDelete={() => handleDelete(admin.id, admin.username)}
                 />
@@ -1465,7 +1493,7 @@ const AdminList = ({ onCreateNew, onEdit }) => {
 };
 
 // User List Component
-const UserList = ({ onCreateNew, onEdit }) => {
+const UserList = ({ onCreateNew, onEdit, currentUser }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1479,7 +1507,11 @@ const UserList = ({ onCreateNew, onEdit }) => {
     fetch(`${API_BASE_URL}/api/users?role=User`)
       .then((res) => res.json())
       .then((data) => {
-        setUsers(data);
+        const adminDomain = currentUser?.domain;
+        const adminRole = currentUser?.role;
+        const isSpecialDomain = !adminDomain || adminDomain === 'xyz' || adminDomain === 'Admin' || adminDomain === 'Super Admin' || adminDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+        const filtered = isSpecialDomain ? data : data.filter(u => (u.domain || u.Domain) === adminDomain);
+        setUsers(filtered);
         setLoading(false);
       })
       .catch((err) => {
@@ -1527,31 +1559,34 @@ const UserList = ({ onCreateNew, onEdit }) => {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
             <tr>
               <th className="px-6 py-4">ID</th>
-              <th className="px-6 py-4">User Name</th>
+              <th className="px-6 py-4 w-full whitespace-nowrap">User Name</th>
               <th className="px-6 py-4">Email</th>
               <th className="px-6 py-4">Role</th>
               <th className="px-6 py-4">Domain</th>
               <th className="px-6 py-4">Designation</th>
               <th className="px-6 py-4">Status</th>
-              <th className="px-6 py-4 text-right">Actions</th>
+              <th className="px-6 py-4 text-center">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-sm">
             {loading ? (
               <tr>
-                <td colSpan="5" className="p-4 text-center">
-                  Loading...
+                <td colSpan="8" className="p-4 text-center text-slate-400">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    Loading users...
+                  </div>
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan="5" className="p-4 text-center">
-                  No users found.
+                <td colSpan="8" className="p-12 text-center text-slate-400 italic">
+                  No users found in the system.
                 </td>
               </tr>
             ) : (
@@ -1564,6 +1599,7 @@ const UserList = ({ onCreateNew, onEdit }) => {
                   domain={user.domain || "N/A"}
                   status={user.status}
                   email={user.email}
+                  role={user.role}
                   onEdit={() => onEdit(user)}
                   onDelete={() => handleDelete(user.id, user.username)}
                 />
@@ -1577,29 +1613,25 @@ const UserList = ({ onCreateNew, onEdit }) => {
 };
 
 // User Row
-const UserRow = ({ userId, name, designation, domain, status, email, onEdit, onDelete }) => (
-  <tr className="hover:bg-slate-50 transition-colors group">
-    <td className="px-6 py-4 font-mono text-xs text-slate-500">
+const UserRow = ({ userId, name, email, role, domain, designation, status, onEdit, onDelete }) => (
+  <tr className="hover:bg-slate-50 transition-colors group border-b border-slate-100 last:border-0">
+    <td className="px-6 py-4 font-mono text-xs text-slate-800">
       {userId}
     </td>
-    <td className="px-6 py-4 w-full">
-      <div className="flex items-center gap-3">
-        <div>
-          <p className="font-bold text-slate-800">{name}</p>
-          <p className="text-slate-500 text-xs text-ellipsis">
-            {email}
-          </p>
-        </div>
-      </div>
-    </td>
-    <td className="px-6 py-4 text-slate-600 font-medium">{designation}</td>
-    <td className="px-6 py-4 text-slate-600 min-w-50">{domain}</td>
+    <td className="px-6 py-4 text-slate-600 font-bold w-full whitespace-nowrap">{name}</td>
+    <td className="px-6 py-4 text-slate-600 text-xs font-medium">{email}</td>
     <td className="px-6 py-4">
-      <span
-        className={`px-2 py-1 rounded-full text-xs font-bold ${status === "Active" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}
-      >
-        {status}
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${(role || "").toLowerCase().includes('mentor') ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+        {role}
       </span>
+    </td>
+    <td className="px-6 py-4 text-slate-600 text-sm min-w-50">{domain}</td>
+    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{designation}</td>
+    <td className="px-6 py-4">
+      <div className={`flex items-center gap-2 px-2 py-1 rounded-md w-fit ${status === "Active" ? "bg-green-50 text-green-700 border border-green-100" : "bg-slate-50 text-slate-600 border border-slate-100"}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${status === "Active" ? "bg-green-500" : "bg-slate-400"}`}></span>
+        <span className="text-xs font-bold">{status}</span>
+      </div>
     </td>
     <td className="px-6 py-4 text-right">
       <div className="flex items-center justify-end gap-2">
@@ -1627,14 +1659,10 @@ const UserRow = ({ userId, name, designation, domain, status, email, onEdit, onD
 // Admin Row
 const AdminRow = ({ userId, name, role, designation, domain, status, email, onEdit, onDelete }) => (
   <tr className="hover:bg-slate-50 transition-colors group border-b border-slate-100 last:border-0">
-    <td className="px-6 py-4 font-mono text-xs text-slate-500">
+    <td className="px-6 py-4 font-mono text-xs text-slate-800">
       {userId}
     </td>
-    <td className="px-6 py-4 w-full">
-      <div className="flex items-center gap-5">
-        <p className="font-bold text-slate-800 text-sm min-w-40">{name}</p>
-      </div>
-    </td>
+    <td className="px-6 py-4 text-slate-600 font-bold w-full whitespace-nowrap">{name}</td>
     <td className="px-6 py-4 text-slate-500 text-xs">{email}</td>
     <td className="px-6 py-4">
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${(role || '').toLowerCase().includes('super') ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' :
@@ -1657,7 +1685,7 @@ const AdminRow = ({ userId, name, role, designation, domain, status, email, onEd
         <button
           onClick={onEdit}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 rounded-lg transition-all text-xs font-bold border border-blue-100 shadow-sm"
-          title="Edit Admin"
+          title="Edit User"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
           Edit
@@ -1665,7 +1693,7 @@ const AdminRow = ({ userId, name, role, designation, domain, status, email, onEd
         <button
           onClick={onDelete}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-lg transition-all text-xs font-bold border border-red-100 shadow-sm"
-          title="Delete Admin"
+          title="Delete User"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
           Delete
@@ -1676,31 +1704,37 @@ const AdminRow = ({ userId, name, role, designation, domain, status, email, onEd
 );
 
 // Logs And Audit Row 
-const LogAuditRow = ({ id, timestamp, username, designation, email, domain, role, action }) => {
-  const dateObj = timestamp ? new Date(timestamp) : null;
-  const isLogin = action && action.toLowerCase().includes('log in') || action.toLowerCase().includes('logged in');
-  const isLogout = action && action.toLowerCase().includes('log out') || action.toLowerCase().includes('logged out');
-  const timeStr = dateObj ? dateObj.toLocaleTimeString() : 'N/A';
+const LogAuditRow = ({ id, timestamp, login_time, logout_time, username, designation, email, domain, role, action }) => {
+  const isLogin = action && (action.toLowerCase().includes('login') || action.toLowerCase().includes('log in') || action.toLowerCase().includes('logged in'));
+  const isLogout = action && (action.toLowerCase().includes('logout') || action.toLowerCase().includes('log out') || action.toLowerCase().includes('logged out') || action.toLowerCase().includes('session completed'));
+  
+  // Use logout_time field if available, otherwise fallback to timestamp if it's a logout action
+  const loginTimeValue = login_time || (!isLogout ? timestamp : null);
+  const logoutTimeValue = logout_time || (isLogout ? timestamp : null);
+
+  const displayLoginTime = loginTimeValue ? new Date(loginTimeValue).toLocaleTimeString() : null;
+  const displayLogoutTime = logoutTimeValue ? new Date(logoutTimeValue).toLocaleTimeString() : null;
+  const displayDate = (loginTimeValue || logoutTimeValue) ? new Date(loginTimeValue || logoutTimeValue).toLocaleDateString('en-GB') : 'N/A';
 
   return (
     <tr className="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0 group">
       <td className="px-6 py-4 font-mono text-xs text-slate-400 group-hover:text-slate-600 transition-colors">#{id}</td>
-      <td className="px-6 py-4 text-sm text-slate-600">{dateObj ? dateObj.toLocaleDateString() : 'N/A'}</td>
+      <td className="px-6 py-4 text-sm text-slate-600">{displayDate}</td>
       <td className="px-6 py-4">
-        {isLogin ? (
+        {displayLoginTime ? (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 text-xs font-bold border border-green-100 whitespace-nowrap">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-            {timeStr}
+            {displayLoginTime}
           </span>
         ) : (
           <span className="text-slate-300 text-xs">-</span>
         )}
       </td>
       <td className="px-6 py-4">
-        {isLogout ? (
+        {displayLogoutTime ? (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 text-xs font-bold border border-red-100 whitespace-nowrap">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-            {timeStr}
+            {displayLogoutTime}
           </span>
         ) : (
           <span className="text-slate-300 text-xs">-</span>
@@ -1711,7 +1745,7 @@ const LogAuditRow = ({ id, timestamp, username, designation, email, domain, role
           <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 uppercase border border-slate-200">
             {(username || '?').charAt(0)}
           </div>
-          <span className="font-bold text-slate-800 text-xs">{username || 'N/A'}</span>
+          <span className="font-bold text-slate-800 text-xs whitespace-nowrap">{username || 'N/A'}</span>
         </div>
       </td>
       <td className="px-6 py-4 text-slate-600 text-xs font-medium">{designation || 'N/A'}</td>
@@ -2202,7 +2236,7 @@ const ReportDetailsModal = ({ report, onClose }) => {
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Date</label>
-                <p className="font-bold text-slate-800">{report.date}</p>
+                <p className="font-bold text-slate-800">{report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}</p>
               </div>
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Day</label>
@@ -2352,7 +2386,7 @@ const ReportView = ({
       )}
 
       {showForm ? (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="mb-8">
             <div className="mb-6">
               <NovanectarLogo size="large" />
@@ -2619,7 +2653,7 @@ const ReportView = ({
                       <p className="text-slate-800 font-medium">{report.name || report.createdBy}</p>
                     </td>
                     <td className="px-6 py-4 text-slate-600">
-                      {report.date}
+                      {report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}
                     </td>
                     <td className="px-6 py-4 text-slate-500 italic">
                       {report.day}

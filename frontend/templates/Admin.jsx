@@ -15,20 +15,34 @@ const Admin = () => {
     const pollingIntervalRef = useRef(null);
     const navigate = useNavigate();
     const location = useLocation();
-    const [currentUser, setCurrentUser] = useState({ name: 'Admin', domain: 'Admin Dashboard' });
+    const [currentUser, setCurrentUser] = useState(() => {
+        const stored = localStorage.getItem('currentUser');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            return { 
+                name: parsed.username, 
+                username: parsed.username, 
+                domain: parsed.domain || '', 
+                role: parsed.role || '',
+                designation: parsed.designation || ''
+            };
+        }
+        return { name: 'Admin', username: 'Admin', domain: '', role: '', designation: '' };
+    });
     const [dashboardStats, setDashboardStats] = useState({ dailyProductivity: '--', weeklyActivity: '--' });
     const [editingData, setEditingData] = useState(null);
 
 
     const handleLogout = async () => {
         try {
-            if (currentUser && currentUser.name) {
+            const username = currentUser.username || currentUser.name;
+            if (username) {
                 // Record logout activity
                 await fetch(`${API_BASE_URL}/activity`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        username: currentUser.name,
+                        username: username,
                         action: 'logout',
                         app_url: 'Admin Dashboard'
                     }),
@@ -37,7 +51,7 @@ const Admin = () => {
                 await fetch(`${API_BASE_URL}/api/logout`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ username: currentUser.name }),
+                    body: JSON.stringify({ username: username }),
                 });
             }
         } catch (error) {
@@ -105,8 +119,9 @@ const Admin = () => {
             }
 
             const data = await response.json();
-            setReportsData(data);
-            setCurrentView(reportType.toLowerCase().includes('daily') ? 'daily-reports' : 'weekly-reports');
+            const mentorDomain = currentUser.domain || JSON.parse(localStorage.getItem('currentUser'))?.domain;
+            const filteredReports = mentorDomain ? data.filter(r => r.domain === mentorDomain) : data;
+            setReportsData(filteredReports);
 
             // Set up real-time polling - refresh every 3 seconds
             pollingIntervalRef.current = setInterval(async () => {
@@ -120,7 +135,8 @@ const Admin = () => {
 
                     if (refreshResponse.ok) {
                         const updatedData = await refreshResponse.json();
-                        setReportsData(updatedData);
+                        const filteredRefresh = mentorDomain ? updatedData.filter(r => r.domain === mentorDomain) : updatedData;
+                        setReportsData(filteredRefresh);
                     }
                 } catch (err) {
                     console.warn(`Real-time polling error for ${reportType}:`, err);
@@ -143,11 +159,16 @@ const Admin = () => {
             });
             if (response.ok) {
                 const data = await response.json();
-                setUsersList(data);
+                const mentorDomain = currentUser.domain;
+                const adminRole = currentUser.role;
+                const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+                
+                const filteredUsers = isSpecialDomain ? data : data.filter(u => (u.domain || u.Domain) === mentorDomain);
+                setUsersList(filteredUsers);
 
-                // Also update dashboard stats based on new users list
-                const activeUsers = data.filter(u => u.status === 'Active').length;
-                const productivity = data.length > 0 ? Math.round((activeUsers / data.length) * 100) : 0;
+                // Also update dashboard stats based on filtered users list
+                const activeUsers = filteredUsers.filter(u => u.status === 'Active').length;
+                const productivity = filteredUsers.length > 0 ? Math.round((activeUsers / filteredUsers.length) * 100) : 0;
                 setDashboardStats({
                     dailyProductivity: `${productivity}%`,
                     weeklyActivity: `${productivity}%`
@@ -163,7 +184,11 @@ const Admin = () => {
             const response = await fetch(`${API_BASE_URL}/api/logs`);
             if (response.ok) {
                 const data = await response.json();
-                setLogsData(data);
+                const mentorDomain = currentUser.domain;
+                const adminRole = currentUser.role;
+                const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+                const domainLogs = isSpecialDomain ? data : data.filter(log => (log.domain || log.Domain) === mentorDomain);
+                setLogsData(domainLogs);
             }
         } catch (err) {
             console.warn("Real-time polling error for logs:", err);
@@ -179,19 +204,33 @@ const Admin = () => {
                 fetch(`${API_BASE_URL}/api/mentors/performance`)
             ]);
 
+            const mentorDomain = currentUser.domain;
+            const adminRole = currentUser.role;
+            const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
+
             if (uRes.ok) {
                 const users = await uRes.json();
-                setUsersList(users);
-                const activeUsers = users.filter(u => u.status === 'Active').length;
-                const productivity = users.length > 0 ? Math.round((activeUsers / users.length) * 100) : 0;
+                const filteredUsers = isSpecialDomain ? users : users.filter(u => (u.domain || u.Domain) === mentorDomain);
+                setUsersList(filteredUsers);
+                const activeUsers = filteredUsers.filter(u => u.status === 'Active').length;
+                const productivity = filteredUsers.length > 0 ? Math.round((activeUsers / filteredUsers.length) * 100) : 0;
                 setDashboardStats({
                     dailyProductivity: `${productivity}%`,
                     weeklyActivity: `${productivity}%`
                 });
             }
-            if (rRes.ok) setReportsData(await rRes.json());
-            if (lRes.ok) setLogsData(await lRes.json());
-            if (mRes.ok) setMentorPerformance(await mRes.json());
+            if (rRes.ok) {
+                const reports = await rRes.json();
+                setReportsData(isSpecialDomain ? reports : reports.filter(r => (r.domain || r.Domain) === mentorDomain));
+            }
+            if (lRes.ok) {
+                const logs = await lRes.json();
+                setLogsData(isSpecialDomain ? logs : logs.filter(l => (l.domain || l.Domain) === mentorDomain));
+            }
+            if (mRes.ok) {
+                const performance = await mRes.json();
+                setMentorPerformance(isSpecialDomain ? performance : performance.filter(m => (m.domain || m.Domain) === mentorDomain));
+            }
         } catch (err) {
             console.error("Failed to fetch dashboard data:", err);
         }
@@ -575,15 +614,7 @@ const Admin = () => {
                                                 logsData.map((log) => (
                                                     <LogStartRow
                                                         key={log.id}
-                                                        id={log.id}
-                                                        date={log.timestamp ? new Date(log.timestamp).toLocaleDateString() : 'N/A'}
-                                                        time={log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'N/A'}
-                                                        username={log.username}
-                                                        designation={log.designation}
-                                                        email={log.email}
-                                                        domain={log.domain || 'System'}
-                                                        role={log.role || 'User'}
-                                                        action={log.action}
+                                                        {...log}
                                                     />
                                                 ))
                                             )}
@@ -652,9 +683,9 @@ const Admin = () => {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase">{user.designation}</span>
+                                                        <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase">{user.domain}</span>
                                                     </td>
-                                                    <td className="px-6 py-4 text-slate-600 font-medium">{user.department}</td>
+                                                    <td className="px-6 py-4 text-slate-600 font-medium">{user.designation}</td>
                                                     <td className="px-6 py-4">
                                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
                                                             }`}>
@@ -715,10 +746,10 @@ const Admin = () => {
                                             usersList.filter(u => u.role && u.role.toLowerCase().includes('mentor')).map((user) => (
                                                 <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                                                     <td className="px-6 py-4 font-bold text-slate-800">{user.username}</td>
-                                                    <td className="px-6 py-4 text-slate-600">{user.department}</td>
+                                                    <td className="px-6 py-4 text-slate-600">{user.domain}</td>
                                                     <td className="px-6 py-4 text-slate-500 font-mono text-xs">{user.custom_id || user.id}</td>
                                                     <td className="px-6 py-4 font-semibold text-slate-700">
-                                                        {usersList.filter(u => u.department === user.department && u.id !== user.id).length}
+                                                        {usersList.filter(u => u.domain === user.domain && u.id !== user.id).length}
                                                     </td>
                                                     <td className="px-6 py-4">
                                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
@@ -770,25 +801,25 @@ const Admin = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {[...new Set(usersList.map(u => u.department).filter(Boolean))].length === 0 ? (
+                                        {[...new Set(usersList.map(u => u.domain).filter(Boolean))].length === 0 ? (
                                             <tr>
                                                 <td colSpan="5" className="p-12 text-center text-slate-400">
                                                     No domains found.
                                                 </td>
                                             </tr>
                                         ) : (
-                                            [...new Set(usersList.map(u => u.department).filter(Boolean))].map((domain, index) => (
+                                            [...new Set(usersList.map(u => u.domain).filter(Boolean))].map((domain, index) => (
                                                 <tr key={index} className="hover:bg-slate-50 transition-colors">
                                                     <td className="px-6 py-4 text-slate-500 font-mono text-xs">#{index + 1}</td>
                                                     <td className="px-6 py-4 font-bold text-slate-800">{domain}</td>
                                                     <td className="px-6 py-4">
                                                         <div className="flex flex-col gap-1">
-                                                            {usersList.filter(u => u.department === domain && u.status === 'Active').map(u => (
+                                                            {usersList.filter(u => u.domain === domain && u.status === 'Active').map(u => (
                                                                 <span key={u.id} className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded inline-block w-fit">
                                                                     {u.username} <span className="text-slate-400">({u.custom_id || u.id})</span>
                                                                 </span>
                                                             ))}
-                                                            {usersList.filter(u => u.department === domain && u.status === 'Active').length === 0 && (
+                                                            {usersList.filter(u => u.domain === domain && u.status === 'Active').length === 0 && (
                                                                 <span className="text-slate-400 italic text-xs">No active users</span>
                                                             )}
                                                         </div>
@@ -874,7 +905,7 @@ const Admin = () => {
                                                 <LogStartRow
                                                     key={log.id}
                                                     id={log.id}
-                                                    date={log.timestamp ? new Date(log.timestamp).toLocaleDateString() : 'N/A'}
+                                                    date={log.timestamp ? new Date(log.timestamp).toLocaleDateString('en-GB') : 'N/A'}
                                                     time={log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'N/A'}
                                                     username={log.username}
                                                     designation={log.designation}
@@ -951,7 +982,7 @@ const Admin = () => {
                                                         <p className="text-slate-700 font-medium">{report.createdBy || report.name}</p>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <div className="text-slate-600">{report.date}</div>
+                                                        <div className="text-slate-600">{report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}</div>
                                                     </td>
                                                     <td className="px-6 py-4 text-slate-400 italic">
                                                         {report.day}
@@ -1037,29 +1068,37 @@ const ReportFolder = ({ title, count, color = "text-orange-500" }) => (
 );
 
 // Log Row Component(used in Recent Log Activity table)
-const LogStartRow = ({ id, date, time, username, designation, email, domain, role, action }) => {
-    const isLogin = action && (action.toLowerCase().includes('log in') || action.toLowerCase().includes('logged in'));
-    const isLogout = action && (action.toLowerCase().includes('log out') || action.toLowerCase().includes('logged out'));
+const LogStartRow = ({ id, timestamp, login_time, logout_time, username, designation, email, domain, role, action }) => {
+    const isLogin = action && (action.toLowerCase().includes('login') || action.toLowerCase().includes('log in') || action.toLowerCase().includes('logged in'));
+    const isLogout = action && (action.toLowerCase().includes('logout') || action.toLowerCase().includes('log out') || action.toLowerCase().includes('logged out') || action.toLowerCase().includes('session completed'));
+    
+    // Use logout_time field if available, otherwise fallback to timestamp if it's a logout action
+    const loginTimeValue = login_time || (!isLogout ? timestamp : null);
+    const logoutTimeValue = logout_time || (isLogout ? timestamp : null);
+
+    const displayLoginTime = loginTimeValue ? new Date(loginTimeValue).toLocaleTimeString() : null;
+    const displayLogoutTime = logoutTimeValue ? new Date(logoutTimeValue).toLocaleTimeString() : null;
+    const displayDate = (loginTimeValue || logoutTimeValue) ? new Date(loginTimeValue || logoutTimeValue).toLocaleDateString('en-GB') : 'N/A';
 
     return (
       <tr className="bg-white hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0 group">
         <td className="px-6 py-4 font-mono text-xs text-slate-400 group-hover:text-slate-600 transition-colors">#{id}</td>
-        <td className="px-6 py-4 text-sm text-slate-600">{date}</td>
+        <td className="px-6 py-4 text-sm text-slate-600">{displayDate}</td>
         <td className="px-6 py-4">
-            {isLogin ? (
+            {displayLoginTime ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 text-xs font-bold border border-green-100 whitespace-nowrap">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                    {time}
+                    {displayLoginTime}
                 </span>
             ) : (
                 <span className="text-slate-300 text-xs">-</span>
             )}
         </td>
         <td className="px-6 py-4">
-            {isLogout ? (
+            {displayLogoutTime ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 text-xs font-bold border border-red-100 whitespace-nowrap">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                    {time}
+                    {displayLogoutTime}
                 </span>
             ) : (
                 <span className="text-slate-300 text-xs">-</span>
