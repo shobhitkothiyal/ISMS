@@ -31,17 +31,12 @@ const Admin = () => {
         return { name: 'Admin', username: 'Admin', domain: '', role: '', designation: '' };
     });
     const [dashboardStats, setDashboardStats] = useState({ dailyProductivity: '--', weeklyActivity: '--' });
-    const [editingData, setEditingData] = useState(null);
-    const [mentorsList, setMentorsList] = useState([]);
-    const [selectedReport, setSelectedReport] = useState(null);
 
     const handleLogout = async () => {
         try {
             if (!currentUser?.username) return;
 
-            console.log("Logging out user:", currentUser.username);
-
-            // Call logout API FIRST
+            // Call logout API to record logout time
             const response = await fetch(`${API_BASE_URL}/api/logout`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -50,20 +45,16 @@ const Admin = () => {
                 }),
             });
 
-            const result = await response.json();
-            console.log("Logout API response:", result);
-
-            if (!response.ok) {
-                console.error("Logout failed on backend");
-                return;
+            if (response.ok) {
+                console.log("Logout recorded successfully");
             }
-
-            // Only after success, clear localStorage and navigate
-            localStorage.removeItem("currentUser");
-            navigate("/");
-
         } catch (error) {
-            console.error("Logout failed:", error);
+            console.error("Error recording logout:", error);
+        } finally {
+            // Clear localStorage and redirect
+            localStorage.removeItem("currentUser");
+            localStorage.removeItem("token");
+            navigate("/");
         }
     };
 
@@ -385,9 +376,50 @@ const Admin = () => {
         }
     }, []);
 
+    // Handle window close/tab close
+    useEffect(() => {
+        const handleBeforeUnload = async (e) => {
+          if (currentUser?.username) {
+            // Get current time
+            const now = new Date();
+            const formattedTime = now.toLocaleString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              month: "short",
+              day: "numeric",
+              year: "numeric"
+            });
+
+            // Call logout API
+            try {
+              await fetch(`${API_BASE_URL}/api/logout`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  username: currentUser.username
+                }),
+                keepalive: true
+              });
+
+              // Show logout modal with time
+              setLogoutTime(formattedTime);
+              setShowLogoutModal(true);
+            } catch (error) {
+              console.error("Logout failed on window close:", error);
+            }
+          }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => {
+          window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+    }, [currentUser]);
+
     return (
         <div className="flex h-screen bg-[#F8F9FA] font-sans text-slate-800">
-
+            {/* Logout Modal */}
             {/* Loading Overlay */}
             {isLoading && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -667,7 +699,8 @@ const Admin = () => {
                                                 <th className="px-6 py-3 font-medium text-xs">Designation</th>
                                                 <th className="px-6 py-3 font-medium text-xs">Email</th>
                                                 <th className="px-6 py-3 font-medium text-xs">Domain</th>
-                                                <th className="px-6 py-3 font-medium text-xs">Role Type</th>
+                                                    <th className="px-6 py-3 font-medium text-xs">Role Type</th>
+                                                <th className="px-6 py-3 font-medium text-xs">Status</th>
                                                 <th className="px-6 py-3 font-medium text-xs">Action</th>
                                             </tr>
                                         </thead>
@@ -962,6 +995,7 @@ const Admin = () => {
                                             <th className="px-6 py-4">Email</th>
                                             <th className="px-6 py-4">Domain</th>
                                             <th className="px-6 py-4">Role Type</th>
+                                            <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4">Action</th>
                                         </tr>
                                     </thead>
@@ -1017,7 +1051,7 @@ const Admin = () => {
                                             <th className="px-6 py-4">Title / Project</th>
                                             <th className="px-6 py-4">Designation</th>
                                             <th className="px-6 py-4">Submitted By</th>
-                                            <th className="px-6 py-4">Date</th>
+                                            <th className="px-6 py-4">{currentView === 'weekly-reports' ? 'Week' : 'Date'}</th>
                                             <th className="px-6 py-4">Day</th>
                                             <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4 text-right">Actions</th>
@@ -1046,7 +1080,7 @@ const Admin = () => {
                                                         <p className="text-slate-700 font-medium">{report.createdBy || report.name}</p>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <div className="text-slate-600">{report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}</div>
+                                                        <div className="text-slate-600">{currentView === 'weekly-reports' ? getWeekOfMonth(report.date) : (report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A')}</div>
                                                     </td>
                                                     <td className="px-6 py-4 text-slate-400 italic">
                                                         {report.day}
@@ -1143,6 +1177,9 @@ const LogStartRow = ({ id, timestamp, login_time, logout_time, username, designa
     const isLogin = action && (action.toLowerCase().includes('login') || action.toLowerCase().includes('log in') || action.toLowerCase().includes('logged in'));
     const isLogout = action && (action.toLowerCase().includes('logout') || action.toLowerCase().includes('log out') || action.toLowerCase().includes('logged out') || action.toLowerCase().includes('session completed'));
     
+    // Determine status based on action
+    const status = isLogin ? 'Online' : isLogout ? 'Offline' : 'Pending';
+    
     // Use logout_time field if available, otherwise fallback to timestamp if it's a logout action
     const loginTimeValue = login_time || (!isLogout ? timestamp : null);
     const logoutTimeValue = logout_time || (isLogout ? timestamp : null);
@@ -1192,6 +1229,20 @@ const LogStartRow = ({ id, timestamp, login_time, logout_time, username, designa
                 'bg-slate-50 text-slate-600 border-slate-100'
             }`}>
                 {role}
+            </span>
+        </td>
+        <td className="px-6 py-4">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold border whitespace-nowrap ${
+                status === 'Online' ? 'bg-green-50 text-green-700 border-green-100' :
+                status === 'Offline' ? 'bg-red-50 text-red-700 border-red-100' :
+                'bg-yellow-50 text-yellow-700 border-yellow-100'
+            }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                    status === 'Online' ? 'bg-green-500' :
+                    status === 'Offline' ? 'bg-red-500' :
+                    'bg-yellow-500'
+                }`}></span>
+                {status}
             </span>
         </td>
         <td className="px-6 py-4">
@@ -1477,7 +1528,7 @@ const WeeklyReportDetailsModal = ({ report, onClose }) => {
     }));
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
             <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-2xl rounded-xl relative flex flex-col my-8 origin-top scale-95 animate-in zoom-in-95 duration-300">
                 
                 {/* Header - Non Printable Actions */}
@@ -1558,9 +1609,9 @@ const WeeklyReportDetailsModal = ({ report, onClose }) => {
                                         <div className="p-2 border-r border-black text-slate-700 min-w-0">
                                             Day {taskItem.day}, Date: {taskItem.date || 'dd/mm/yy'} ({taskItem.dayName})
                                         </div>
-                                        <div className="p-2 whitespace-pre-wrap break-words min-w-0">
+                                        <div className="p-2 whitespace-pre-wrap wrap-break-word min-w-0">
                                             {taskItem.tasks ? (
-                                                <div className="italic text-blue-900 font-medium break-words">{taskItem.tasks}</div>
+                                                <div className="italic text-blue-900 font-medium wrap-break-word">{taskItem.tasks}</div>
                                             ) : (
                                                 <>
                                                     <div>Task 1:</div>
@@ -1578,9 +1629,9 @@ const WeeklyReportDetailsModal = ({ report, onClose }) => {
                     {/* Future Aims */}
                     <div className="mb-6 mt-8">
                          <h2 className="font-bold mb-2">Future Aims:</h2>
-                         <div className="grid grid-cols-2 items-stretch min-h-[40px] border border-black text-[13px]">
+                         <div className="grid grid-cols-2 items-stretch min-h-10 border border-black text-[13px]">
                              <div className="p-2 font-semibold min-w-0">Aim 1:</div>
-                             <div className="border-l border-black p-2 whitespace-pre-wrap break-words min-w-0 flex items-center">
+                             <div className="border-l border-black p-2 whitespace-pre-wrap wrap-break-word   min-w-0 flex items-center">
                                  {report.weeklySummary || ''}
                              </div>
                          </div>
@@ -1589,14 +1640,14 @@ const WeeklyReportDetailsModal = ({ report, onClose }) => {
                     {/* Challenges */}
                     <div className="mb-10">
                          <h2 className="font-bold mb-2">Challenges:</h2>
-                         <div className="min-h-[40px] whitespace-pre-wrap break-words text-[13px]">
+                         <div className="min-h-10 whitespace-pre-wrap wrap-break-word text-[13px]">
                             {report.challenges || ''}
                          </div>
                     </div>
 
                     {/* Conclusion & Signatures */}
                     <div className="mt-8 mb-4">
-                        <h2 className="font-bold mb-[80px]">Conclusion:</h2>
+                        <h2 className="font-bold mb-20">Conclusion:</h2>
                         
                         <div className="grid grid-cols-3 gap-6 text-[13px]">
                             <div className="text-left font-semibold">Mentore Sign</div>
@@ -1626,6 +1677,34 @@ const WeeklyReportDetailsModal = ({ report, onClose }) => {
             `}} />
         </div>
     );
+};
+
+// Helper function to calculate week of month from date
+const getWeekOfMonth = (dateString) => {
+  if (!dateString) return 'N/A';
+  
+  try {
+    let date;
+    // Handle different date formats
+    if (dateString.includes('-') && dateString.split('-').length === 3) {
+      // Format: YYYY-MM-DD
+      const [year, month, day] = dateString.split('-');
+      date = new Date(year, month - 1, day);
+    } else {
+      date = new Date(dateString);
+    }
+    
+    if (isNaN(date.getTime())) return 'N/A';
+    
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+    const weekNumber = Math.ceil((date.getDate() + firstDay.getDay()) / 7);
+    
+    // Convert to ordinal (1st, 2nd, 3rd, 4th, 5th)
+    const ordinals = ['', '1st', '2nd', '3rd', '4th', '5th'];
+    return ordinals[weekNumber] || `${weekNumber}th`;
+  } catch (error) {
+    return 'N/A';
+  }
 };
 
 export default Admin;

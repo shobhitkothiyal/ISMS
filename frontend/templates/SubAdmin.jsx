@@ -43,33 +43,7 @@ const SubAdmin = () => {
     const navigate = useNavigate();
     const location = useLocation();
 
-    const handleLogout = async () => {
-        try {
-            const username = currentUser.username || currentUser.name;
-            if (username) {
-                // Record logout activity
-                await fetch(`${API_BASE_URL}/activity`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        username: username,
-                        action: 'logout',
-                        app_url: 'Mentor Dashboard'
-                    }),
-                });
 
-                await fetch(`${API_BASE_URL}/api/logout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ username: username }),
-                });
-            }
-        } catch (error) {
-            console.error("Logout failed:", error);
-        }
-        localStorage.removeItem("currentUser");
-        navigate('/');
-    };
     // Fetch daily reports for the "Daily Reports" view with backend integration, polling, and error handling
     const handleReportClick = async (reportType = 'daily') => {
         try {
@@ -153,6 +127,8 @@ const SubAdmin = () => {
             console.warn("Real-time polling error for users:", err);
         }
     };
+
+
 
     const handleUsersClick = async () => {
         try {
@@ -269,6 +245,33 @@ const SubAdmin = () => {
             navigate('/mentor/assigned-tasks');
         }
     };
+
+    // Handle logout with backend integration
+    const handleLogout = async () => {
+        try {
+            // Call backend logout API to record logout time
+            const response = await fetch(`${API_BASE_URL}/api/logout`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: currentUser.username
+                })
+            });
+
+            if (response.ok) {
+                console.log('Logout recorded successfully');
+            }
+        } catch (error) {
+            console.error('Error recording logout:', error);
+        } finally {
+            // Clear local data and redirect to login
+            localStorage.removeItem('currentUser');
+            localStorage.removeItem('token');
+            navigate('/login');
+        }
+    };
     // Task creation handler with backend integration and frontend fallback
     const handleCreateTask = async (e) => {
         e.preventDefault();
@@ -330,6 +333,46 @@ const SubAdmin = () => {
         }
     }, []);
 
+    // Handle window close/tab close
+    useEffect(() => {
+        const handleBeforeUnload = async (e) => {
+          if (currentUser?.username || currentUser?.name) {
+            // Get current time
+            const now = new Date();
+            const formattedTime = now.toLocaleString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              month: "short",
+              day: "numeric",
+              year: "numeric"
+            });
+
+            // Call logout API
+            try {
+              const username = currentUser.username || currentUser.name;
+              await fetch(`${API_BASE_URL}/api/logout`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username }),
+                keepalive: true
+              });
+
+              // Show logout modal with time
+              setLogoutTime(formattedTime);
+              setShowLogoutModal(true);
+            } catch (error) {
+              console.error("Logout failed on window close:", error);
+            }
+          }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => {
+          window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+    }, [currentUser]);
+
     useEffect(() => {
         const storedUser = localStorage.getItem('currentUser');
         if (storedUser && usersList.length > 0) {
@@ -388,6 +431,7 @@ const SubAdmin = () => {
 
     return (
         <div className="flex h-screen bg-[#F8F9FA] font-sans text-slate-800">
+
 
             {/* Sidebar */}
             <aside className={`w-64 bg-white flex flex-col border-r border-slate-200 shrink-0 transition-all duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-30 h-full`}>
@@ -645,15 +689,20 @@ const SubAdmin = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {(activities.length > 0 ? activities : []).slice(0, 5).map((log) => (
-                                                <ActivityRow
-                                                    key={log.id}
-                                                    date={log.login_time ? new Date(log.login_time).toLocaleDateString('en-GB') : 'N/A'}
-                                                    time={log.login_time ? new Date(log.login_time).toLocaleTimeString() : 'N/A'}
-                                                    activity={`${log.username}: ${log.action}`}
-                                                    status={log.action.toLowerCase().includes('logged in') ? 'done' : 'pending'}
-                                                />
-                                            ))}
+                                            {(activities.length > 0 ? activities : []).slice(0, 5).map((log) => {
+                                                const isLogin = log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in'));
+                                                const isLogout = log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed'));
+                                                const status = isLogin ? 'Online' : isLogout ? 'Offline' : 'Pending';
+                                                return (
+                                                    <ActivityRow
+                                                        key={log.id}
+                                                        date={log.login_time ? new Date(log.login_time).toLocaleDateString('en-GB') : 'N/A'}
+                                                        time={log.login_time ? new Date(log.login_time).toLocaleTimeString() : 'N/A'}
+                                                        activity={`${log.username}: ${log.action}`}
+                                                        status={status}
+                                                    />
+                                                );
+                                            })}
                                             {activities.length === 0 && (
                                                 <tr>
                                                     <td colSpan="3" className="px-6 py-8 text-center text-slate-400">
@@ -1023,7 +1072,7 @@ const SubAdmin = () => {
                                             <th className="px-6 py-4">Project Name</th>
                                             <th className="px-6 py-4">Designation</th>
                                             <th className="px-6 py-4">Submitted By</th>
-                                            <th className="px-6 py-4">Date</th>
+                                            <th className="px-6 py-4">{currentView === 'weekly-reports' ? 'Week' : 'Date'}</th>
                                             <th className="px-6 py-4">Day</th>
                                             <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4 text-right">Actions</th>
@@ -1055,7 +1104,7 @@ const SubAdmin = () => {
                                                         <p className="text-slate-700 font-medium">{report.name || report.createdBy}</p>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <div className="text-slate-600 font-medium">{report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}</div>
+                                                        <div className="text-slate-600 font-medium">{currentView === 'weekly-reports' ? getWeekOfMonth(report.date) : (report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A')}</div>
                                                     </td>
                                                     <td className="px-6 py-4 text-slate-400 italic text-xs">
                                                         {report.day}
@@ -1117,19 +1166,34 @@ const SidebarItem = ({ icon, label, active, onClick, hasSubmenu, isOpen, childre
     );
 };
 
-const UserRow = ({ id, name, email, domain, loginTime, logoutTime, status }) => (
-    <tr className="hover:bg-slate-50 transition-colors">
-        <td className="px-6 py-4 font-mono text-xs text-slate-500">{id}</td>
-        <td className="px-6 py-4 font-semibold text-slate-700 whitespace-nowrap">{name}</td>
-        <td className="px-6 py-4 text-slate-500">{email}</td>
-        <td className="px-6 py-4 text-slate-500">{domain}</td>
-        <td className="px-6 py-4 text-slate-500 text-xs">{loginTime ? new Date(loginTime).toLocaleTimeString('en-GB') : 'N/A'}</td>
-        <td className="px-6 py-4 text-slate-500 text-xs">{logoutTime ? new Date(logoutTime).toLocaleTimeString('en-GB') : 'N/A'}</td>
-        <td className="px-6 py-4 text-center">
-            <span className={`inline-block w-3 h-3 rounded-full ${status === 'online' ? 'bg-green-500 shadow-sm shadow-green-300' : 'bg-slate-300'}`}></span>
-        </td>
-    </tr>
-);
+const UserRow = ({ id, name, email, domain, loginTime, logoutTime, status }) => {
+    const formatDateTime = (dateTimeString) => {
+        if (!dateTimeString) return 'N/A';
+        const date = new Date(dateTimeString);
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    };
+
+    return (
+        <tr className="hover:bg-slate-50 transition-colors">
+            <td className="px-6 py-4 font-mono text-xs text-slate-500">{id}</td>
+            <td className="px-6 py-4 font-semibold text-slate-700 whitespace-nowrap">{name}</td>
+            <td className="px-6 py-4 text-slate-500">{email}</td>
+            <td className="px-6 py-4 text-slate-500">{domain}</td>
+            <td className="px-6 py-4 text-slate-500 text-xs">{loginTime ? formatDateTime(loginTime) : 'N/A'}</td>
+            <td className="px-6 py-4 text-slate-500 text-xs">{logoutTime ? formatDateTime(logoutTime) : 'N/A'}</td>
+            <td className="px-6 py-4 text-center">
+                <span className={`inline-block w-3 h-3 rounded-full ${status === 'online' ? 'bg-green-500 shadow-sm shadow-green-300' : 'bg-slate-300'}`}></span>
+            </td>
+        </tr>
+    );
+};
 
 const ActivityRow = ({ date, time, activity, status }) => (
     <tr className="hover:bg-slate-50 transition-colors">
@@ -1141,10 +1205,18 @@ const ActivityRow = ({ date, time, activity, status }) => (
             <span className="text-slate-600">{activity}</span>
         </td>
         <td className="px-6 py-4">
-            <div className={`flex items-center gap-2 font-medium ${status === 'done' ? 'text-green-600' : 'text-slate-500'}`}>
-                {status === 'done' ? <CheckCircleIcon size={16} /> : <ClockIcon size={16} />}
-                <span className="capitalize">{status === 'done' ? 'Online' : status}</span>
-            </div>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold border whitespace-nowrap ${
+                status === 'Online' ? 'bg-green-50 text-green-700 border-green-100' :
+                status === 'Offline' ? 'bg-red-50 text-red-700 border-red-100' :
+                'bg-yellow-50 text-yellow-700 border-yellow-100'
+            }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                    status === 'Online' ? 'bg-green-500' :
+                    status === 'Offline' ? 'bg-red-500' :
+                    'bg-yellow-500'
+                }`}></span>
+                {status}
+            </span>
         </td>
     </tr>
 );
@@ -1195,5 +1267,33 @@ const TaskIcon = ({ size = 20, className = "" }) => (
 const ChevronDownIcon = ({ size = 20, className = "" }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="6 9 12 15 18 9"></polyline></svg>
 );
+
+// Helper function to calculate week of month from date
+const getWeekOfMonth = (dateString) => {
+  if (!dateString) return 'N/A';
+  
+  try {
+    let date;
+    // Handle different date formats
+    if (dateString.includes('-') && dateString.split('-').length === 3) {
+      // Format: YYYY-MM-DD
+      const [year, month, day] = dateString.split('-');
+      date = new Date(year, month - 1, day);
+    } else {
+      date = new Date(dateString);
+    }
+    
+    if (isNaN(date.getTime())) return 'N/A';
+    
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+    const weekNumber = Math.ceil((date.getDate() + firstDay.getDay()) / 7);
+    
+    // Convert to ordinal (1st, 2nd, 3rd, 4th, 5th)
+    const ordinals = ['', '1st', '2nd', '3rd', '4th', '5th'];
+    return ordinals[weekNumber] || `${weekNumber}th`;
+  } catch (error) {
+    return 'N/A';
+  }
+};
 
 export default SubAdmin;
