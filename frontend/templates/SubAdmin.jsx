@@ -15,10 +15,10 @@ const SubAdmin = () => {
         const stored = localStorage.getItem('currentUser');
         if (stored) {
             const parsed = JSON.parse(stored);
-            return { 
-                name: parsed.username, 
-                username: parsed.username, 
-                domain: parsed.domain || '', 
+            return {
+                name: parsed.username,
+                username: parsed.username,
+                domain: parsed.domain || '',
                 role: parsed.role || '',
                 designation: parsed.designation || 'Mentor'
             };
@@ -93,9 +93,9 @@ const SubAdmin = () => {
             const mentorDomain = currentUser.domain;
             const adminRole = currentUser.role;
             const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
-            
+
             const domainReports = isSpecialDomain ? data : data.filter(r => (r.domain || r.Domain) === mentorDomain);
-            
+
             setReportsData(domainReports);
             setCurrentView(reportType === 'weekly' ? 'weekly-reports' : 'daily-reports');
 
@@ -119,17 +119,35 @@ const SubAdmin = () => {
     // Fetch users for the "Users" view with backend integration and error handling
     const fetchUsers = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/users`, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            if (response.ok) {
-                const data = await response.json();
+            const [uRes, lRes] = await Promise.all([
+                fetch(`${API_BASE_URL}/api/users`),
+                fetch(`${API_BASE_URL}/api/logs`)
+            ]);
+
+            if (uRes.ok && lRes.ok) {
+                const data = await uRes.json();
+                const allLogs = await lRes.json() || [];
                 const mentorDomain = currentUser.domain;
                 const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management';
-                
-                const filteredUsers = isSpecialDomain ? data : data.filter(u => u.domain === mentorDomain);
-                setUsersList(filteredUsers);
+
+                // Filter to only same-domain users
+                const filteredUsers = isSpecialDomain ? data : data.filter(u => (u.domain || u.Domain || '').toLowerCase() === mentorDomain.toLowerCase());
+
+                const usersWithActivity = filteredUsers.map(user => {
+                    const userLogs = allLogs.filter(log => log.username?.trim().toLowerCase() === user.username?.trim().toLowerCase())
+                        .slice().reverse();
+
+                    const lastLoginLog = userLogs.find(log => log.login_time || (log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in'))));
+                    const lastLogoutLog = userLogs.find(log => log.logout_time || (log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed'))));
+
+                    return {
+                        ...user,
+                        login_time: lastLoginLog ? (lastLoginLog.login_time || lastLoginLog.timestamp) : null,
+                        logout_time: lastLogoutLog ? (lastLogoutLog.logout_time || lastLogoutLog.timestamp) : null
+                    };
+                });
+
+                setUsersList(usersWithActivity);
             }
         } catch (err) {
             console.warn("Real-time polling error for users:", err);
@@ -165,14 +183,9 @@ const SubAdmin = () => {
             if (uRes.ok && lRes.ok) {
                 const allUsers = await uRes.json() || [];
                 const allLogs = await lRes.json() || [];
-                
+
                 // Filter logs to show only those in the mentor's domain (case-insensitive)
-                const domainLogs = allLogs.filter(log => {
-                    const logDomain = (log.domain || log.Domain || '').toLowerCase();
-                    const mDomain = (mentorDomain || '').toLowerCase();
-                    return !mentorDomain || mDomain === 'xyz' || logDomain === mDomain;
-                });
-                setActivities(domainLogs);
+                setActivities(allLogs);
 
                 // Combine user data with their latest log activity
                 const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management';
@@ -183,15 +196,20 @@ const SubAdmin = () => {
                 });
 
                 usersWithActivity = domainUsers.map(user => {
-                    // Find the latest login and logout logs for this specific user
-                    const userLogs = allLogs.filter(log => log.username?.trim().toLowerCase() === user.username?.trim().toLowerCase());
-                    const lastLogin = userLogs.slice().reverse().find(log => log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in')));
-                    const lastLogout = userLogs.slice().reverse().find(log => log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed')));
+                    // Find all logs for this specific user, sorted by newest first
+                    const userLogs = allLogs.filter(log => log.username?.trim().toLowerCase() === user.username?.trim().toLowerCase())
+                        .slice().reverse();
+
+                    // Find the latest record that has a login time
+                    const lastLoginLog = userLogs.find(log => log.login_time || (log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in'))));
+
+                    // Find the latest record that has a logout time
+                    const lastLogoutLog = userLogs.find(log => log.logout_time || (log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed'))));
 
                     return {
                         ...user,
-                        login_time: lastLogin ? (lastLogin.login_time || lastLogin.timestamp) : null,
-                        logout_time: lastLogout ? (lastLogout.logout_time || lastLogout.timestamp) : null
+                        login_time: lastLoginLog ? (lastLoginLog.login_time || lastLoginLog.timestamp) : null,
+                        logout_time: lastLogoutLog ? (lastLogoutLog.logout_time || lastLogoutLog.timestamp) : null
                     };
                 });
 

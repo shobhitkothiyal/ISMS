@@ -38,6 +38,15 @@ const SuperAdmin = () => {
     email: "",
     attachment: null,
     weeklySummary: "",
+    challenges: "",
+    weeklyTasks: [
+      { day: 1, dayName: 'Saturday', date: '', tasks: '' },
+      { day: 2, dayName: 'Monday', date: '', tasks: '' },
+      { day: 3, dayName: 'Tuesday', date: '', tasks: '' },
+      { day: 4, dayName: 'Wednesday', date: '', tasks: '' },
+      { day: 5, dayName: 'Thursday', date: '', tasks: '' },
+      { day: 6, dayName: 'Friday', date: '', tasks: '' },
+    ]
   });
 
  const handleLogout = async () => {
@@ -234,8 +243,9 @@ const SuperAdmin = () => {
         status: "Pending",
         date: reportFormData.date || new Date().toISOString().split('T')[0],
         day: reportFormData.day || new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date()),
-        reportContent: reportFormData.reportContent || "",
+        reportContent: showReportForm === "weekly" ? JSON.stringify(reportFormData.weeklyTasks) : (reportFormData.reportContent || ""),
         weeklySummary: reportFormData.weeklySummary || "",
+        challenges: reportFormData.challenges || "",
         attachmentName: reportFormData.attachment ? reportFormData.attachment.name : null,
         mobileNumber: reportFormData.mobileNumber || "",
         email: reportFormData.email || "",
@@ -281,6 +291,15 @@ const SuperAdmin = () => {
         email: "",
         attachment: null,
         weeklySummary: "",
+        challenges: "",
+        weeklyTasks: [
+          { day: 1, dayName: 'Mon', date: '', tasks: '' },
+          { day: 2, dayName: 'Tue', date: '', tasks: '' },
+          { day: 3, dayName: 'Wed', date: '', tasks: '' },
+          { day: 4, dayName: 'Thu', date: '', tasks: '' },
+          { day: 5, dayName: 'Fri', date: '', tasks: '' },
+          { day: 6, dayName: 'Sat', date: '', tasks: '' },
+        ]
       });
 
       setShowReportForm(null);
@@ -2170,9 +2189,186 @@ const PrintIcon = ({ size = 20, className = "" }) => (
 const ReportDetailsModal = ({ report, onClose }) => {
   if (!report) return null;
 
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+
+  let parsedTasks = null;
+  try {
+      if (report.reportContent && report.reportContent.startsWith('[')) {
+          parsedTasks = JSON.parse(report.reportContent);
+      }
+  } catch (e) {
+      console.error("Failed to parse weekly tasks");
+  }
+
+  // Correct weekly report detection since report.type may not be explicitly included in the DB payload
+  const isWeeklyReport = report.type?.toLowerCase() === 'weekly' || report.id?.startsWith('WR') || report.weeklySummary !== undefined;
+
+  // Weekly Report View - Identical to Admin A4 Template
+  if (isWeeklyReport) {
+    const reportDataMappings = parsedTasks || [1, 2, 3, 4, 5, 6].map((dayCode) => ({
+         day: dayCode,
+         dayName: ['saturday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'][dayCode-1],
+         date: 'dd/mm/yy',
+         tasks: dayCode === 1 ? report.reportContent : "Task 1: \nTask 2: \nTask 3: "
+    }));
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-start py-4 justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-2xl rounded-xl relative flex flex-col my-8 origin-top scale-95 animate-in zoom-in-95 duration-300">
+                
+                {/* Header - Non Printable Actions */}
+                <div className="flex justify-between items-center p-4 border-b border-slate-100 sticky top-0 bg-white/80 backdrop-blur-md z-20 print:hidden rounded-t-xl">
+                    <div className="flex items-center gap-2">
+                        <img src={logo} alt="Novanectar Logo" className="h-8" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-slate-800">Report Preview</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => window.print()}
+                            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-semibold shadow-md shadow-blue-200"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print Report
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-all font-bold"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg> Back
+                        </button>
+                    </div>
+                </div>
+
+                {/* Paper Container - Specific Image Format */}
+                <div className="flex-1 p-[20mm] bg-white print:p-0 text-slate-800 text-sm font-sans mx-auto w-full max-w-[190mm]">
+                    
+                    {/* Header Image */}
+                    <div className="flex justify-center mb-6 mt-4">
+                        <img src={logo} alt="Novanectar Logo" className="h-16 object-contain" />
+                    </div>
+
+                    <h1 className="text-center text-2xl font-normal mb-8 text-black">
+                        Weekly Report Year ({currentYear})
+                    </h1>
+
+                    {/* Report Information Grid */}
+                    <div className="space-y-4 mb-6">
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Name:</span> <span className="flex-1">{report.name || report.createdBy}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Position:</span> <span className="flex-1">{report.designation}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Project Name:</span> <span className="flex-1">{report.title || report.projectName}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Contact No:</span> <span className="flex-1">{report.mobileNumber || "N/A"}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Mail:</span> <span className="flex-1">{report.email || "N/A"}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Project Name:</span> <span className="flex-1">{report.title || report.projectName}</span></div>
+                    </div>
+
+                    {/* Introduction */}
+                    <div className="mb-6">
+                        <h2 className="font-bold mb-2">Introduction:</h2>
+                        <p className="text-justify mb-4">
+                            This report provides a comprehensive overview of the activities, performance, and
+                            progress for the Week of <span className="font-semibold px-2 border-b border-black">{currentMonth}</span>, {currentYear}. It highlights key achievements,
+                            challenges faced, and areas for improvement while analyzing key performance indicators
+                            (KPIs) relevant to our operations.
+                        </p>
+                        <p className="text-justify mb-6">
+                            The purpose of this report is to assess our monthly performance against set goals,
+                            ensure transparency in operations, and facilitate data-driven decision-making.
+                            Additionally, it outlines strategic plans for the upcoming month to enhance efficiency
+                            and productivity.
+                        </p>
+                    </div>
+
+                    {/* Executive Summary Table */}
+                    <div className="mb-6">
+                        <h2 className="font-bold mb-2">Executive Summary:</h2>
+                        <div className="border border-black flex flex-col">
+                            <div className="grid grid-cols-[1.5fr_2.5fr] border-b border-black font-semibold text-[13px]">
+                                <div className="p-2 border-r border-black">WEEKS/ DATES</div>
+                                <div className="p-2">PROJECTS/TASKS (Time Slot)</div>
+                            </div>
+                            
+                            {reportDataMappings.map((taskItem, index) => {
+                                return (
+                                    <div key={index} className={`grid grid-cols-[1.5fr_2.5fr] text-[13px] ${index < 5 ? 'border-b border-black' : ''}`}>
+                                        <div className="p-2 border-r border-black text-slate-700 min-w-0">
+                                            Day {taskItem.day}, Date: {taskItem.date || 'dd/mm/yy'} ({taskItem.dayName})
+                                        </div>
+                                        <div className="p-2 whitespace-pre-wrap break-words min-w-0">
+                                            {taskItem.tasks ? (
+                                                <div className="italic text-blue-900 font-medium break-words">{taskItem.tasks}</div>
+                                            ) : (
+                                                <>
+                                                    <div>Task 1:</div>
+                                                    <div>Task 2:</div>
+                                                    <div>Task 3:</div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Future Aims */}
+                    <div className="mb-6 mt-8">
+                         <h2 className="font-bold mb-2">Future Aims:</h2>
+                         <div className="grid grid-cols-2 items-stretch min-h-[40px] border border-black text-[13px]">
+                             <div className="p-2 font-semibold min-w-0">Aim 1:</div>
+                             <div className="border-l border-black p-2 whitespace-pre-wrap break-words min-w-0 flex items-center">
+                                 {report.weeklySummary || ''}
+                             </div>
+                         </div>
+                    </div>
+
+                    {/* Challenges */}
+                    <div className="mb-10">
+                         <h2 className="font-bold mb-2">Challenges:</h2>
+                         <div className="min-h-[40px] whitespace-pre-wrap break-words text-[13px]">
+                            {report.challenges || ''}
+                         </div>
+                    </div>
+
+                    {/* Conclusion & Signatures */}
+                    <div className="mt-8 mb-4">
+                        <h2 className="font-bold mb-[80px]">Conclusion:</h2>
+                        
+                        <div className="grid grid-cols-3 gap-6 text-[13px]">
+                            <div className="text-left font-semibold">Mentore Sign</div>
+                            <div className="text-center font-semibold">Department Approved Signature</div>
+                            <div className="text-right font-semibold">HR Department Signature</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Global CSS for Print */}
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                @media print {
+                  body * { visibility: hidden; }
+                  .print\\:hidden { display: none !important; }
+                  .fixed { position: static !important; }
+                  .inset-0 { position: static !important; }
+                  .bg-white { background: transparent !important; }
+                  .shadow-2xl { box-shadow: none !important; }
+                  .p-4 { padding: 0 !important; }
+                  .bg-slate-900\\/60 { background: transparent !important; }
+                  .modal-container, .modal-container * { visibility: visible; }
+                  .modal-container { position: absolute; left: 0; top: 0; width: 100%; }
+                  @page { margin: 0; size: auto; }
+                }
+            `}} />
+        </div>
+    );
+  }
+
+  // Daily Report View - Default
   return (
-    <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-2xl rounded-xl relative flex flex-col my-8 origin-top scale-95 animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-100 flex items-start justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-2xl rounded-xl relative flex flex-col my-8 sm:my-10 mx-auto text-left animate-in zoom-in-95 duration-300">
 
         {/* Header - Non Printable Actions */}
         <div className="flex justify-between items-center p-4 border-b border-slate-100 sticky top-0 bg-white/80 backdrop-blur-md z-20 print:hidden rounded-t-xl">
@@ -2250,10 +2446,6 @@ const ReportDetailsModal = ({ report, onClose }) => {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Email</label>
                 <p className="text-slate-500 text-xs font-medium">{report.email || "N/A"}</p>
               </div>
-              {/* <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Submission Status</label>
-                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-black uppercase tracking-tighter">● {report.status}</span>
-              </div> */}
             </div>
           </div>
 
@@ -2263,8 +2455,19 @@ const ReportDetailsModal = ({ report, onClose }) => {
               <h2 className="text-lg font-black text-slate-900 uppercase tracking-tighter">Detailed Work Progress</h2>
               <div className="flex-1 h-1 bg-slate-100 rounded-full"></div>
             </div>
-            <div className="min-h-75 text-slate-700 leading-relaxed text-justify whitespace-pre-wrap p-6 border-2 border-slate-50 rounded-2xl bg-white shadow-inner font-mono text-sm italic">
-              {report.reportContent}
+            <div className={`min-h-75 text-slate-700 leading-relaxed text-justify whitespace-pre-wrap p-6 border-2 border-slate-50 rounded-2xl bg-white shadow-inner font-mono text-sm ${parsedTasks ? '' : 'italic'}`}>
+              {parsedTasks ? (
+                <div className="flex flex-col gap-4">
+                  {parsedTasks.map((taskItem, i) => (
+                    <div key={i} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                      <div className="font-bold text-blue-800 mb-1">Day {taskItem.day} - {taskItem.date || 'dd/mm'} ({taskItem.dayName})</div>
+                      <div className="pl-4 text-slate-600">{taskItem.tasks || 'No tasks recorded.'}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                report.reportContent
+              )}
             </div>
           </div>
 
@@ -2386,7 +2589,7 @@ const ReportView = ({
       )}
 
       {showForm ? (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-10 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="mb-8">
             <div className="mb-6">
               <NovanectarLogo size="large" />
@@ -2450,22 +2653,16 @@ const ReportView = ({
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Day <span className="text-red-500">*</span>
+                  Domain <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={formData.day}
-                  onChange={(e) => onFormChange({ ...formData, day: e.target.value })}
+                <input
+                  type="text"
+                  value={formData.domain}
+                  onChange={(e) => onFormChange({ ...formData, domain: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                  placeholder="e.g. Full Stack Developer"
                   required
-                >
-                  <option value="">Select Day</option>
-                  <option value="Monday">Monday</option>
-                  <option value="Tuesday">Tuesday</option>
-                  <option value="Wednesday">Wednesday</option>
-                  <option value="Thursday">Thursday</option>
-                  <option value="Friday">Friday</option>
-                  <option value="Saturday">Saturday</option>
-                </select>
+                />
               </div>
             </div>
 
@@ -2480,7 +2677,7 @@ const ReportView = ({
                   value={formData.designation}
                   onChange={(e) => onFormChange({ ...formData, designation: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                  placeholder="e.g. Developer"
+                  placeholder="e.g. Intern"
                   required
                 />
               </div>
@@ -2529,37 +2726,98 @@ const ReportView = ({
               </div>
             </div>
 
-            {/* Weekly Only Field: Progress Reflection */}
-            {reportType === "weekly" && (
+            {/* Report Content / Executive Summary */}
+            {reportType === "weekly" ? (
+              <div className="mb-6 overflow-x-auto">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Executive Summary (Tasks & Projects) <span className="text-red-500">*</span>
+                </label>
+                <div className="border border-slate-400 flex flex-col min-w-[700px] bg-white text-sm">
+                  <div className="grid grid-cols-[1.5fr_2.5fr] border-b border-slate-400 font-bold text-[13px] bg-white">
+                    <div className="p-3 border-r border-slate-400 text-slate-800">WEEKS/ DATES</div>
+                    <div className="p-3 text-slate-800">PROJECTS/TASKS (Time Slot)</div>
+                  </div>
+                  {formData.weeklyTasks.map((taskItem, index) => (
+                    <div key={index} className={`grid grid-cols-[1.5fr_2.5fr] text-[13px] ${index < 5 ? 'border-b border-slate-400' : ''}`}>
+                      <div className="p-3 border-r border-slate-400 text-slate-800 flex flex-col justify-start">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <span>Day {taskItem.day}, Date:</span>
+                          <input 
+                            type="text" 
+                            className="w-20 px-1 py-0.5 border border-transparent bg-transparent placeholder-slate-400 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 rounded text-[13px]" 
+                            placeholder="dd/mm/yy" 
+                            value={taskItem.date}
+                            onChange={(e) => {
+                              const newTasks = [...formData.weeklyTasks];
+                              newTasks[index].date = e.target.value;
+                              onFormChange({ ...formData, weeklyTasks: newTasks });
+                            }}
+                          />
+                          <span>({taskItem.dayName})</span>
+                        </div>
+                      </div>
+                      <div className="p-0">
+                        <textarea
+                          className="w-full h-full min-h-[70px] p-3 border-none bg-transparent outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400 resize-y text-[13px] text-slate-800 placeholder:text-slate-400"
+                          placeholder={`Task 1: \nTask 2: \nTask 3: `}
+                          value={taskItem.tasks}
+                          onChange={(e) => {
+                            const newTasks = [...formData.weeklyTasks];
+                            newTasks[index].tasks = e.target.value;
+                            onFormChange({ ...formData, weeklyTasks: newTasks });
+                          }}
+                        ></textarea>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Weekly Progress Summary <span className="text-red-500">*</span>
+                  Executive Summary (Tasks & Projects) <span className="text-red-500">*</span>
                 </label>
                 <textarea
-                  value={formData.weeklySummary || ""}
-                  onChange={(e) => onFormChange({ ...formData, weeklySummary: e.target.value })}
+                  value={formData.reportContent}
+                  onChange={(e) => onFormChange({ ...formData, reportContent: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                  placeholder="Summarize your main achievements for this week..."
-                  rows="3"
-                  required={reportType === "weekly"}
+                  placeholder="Day 1: Task A, Day 2: Task B..."
+                  rows="6"
+                  required
                 ></textarea>
               </div>
             )}
 
-            {/* Report Content */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Report Content <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={formData.reportContent}
-                onChange={(e) => onFormChange({ ...formData, reportContent: e.target.value })}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                placeholder="Enter your report details here..."
-                rows="6"
-                required
-              ></textarea>
-            </div>
+            {/* Weekly Only Fields: Future Aims & Challenges */}
+            {reportType === "weekly" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Future Aims (Aim 1) <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={formData.weeklySummary || ""}
+                    onChange={(e) => onFormChange({ ...formData, weeklySummary: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                    placeholder="E.g. Improve API performance or start new project..."
+                    rows="2"
+                    required
+                  ></textarea>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Challenges
+                  </label>
+                  <textarea
+                    value={formData.challenges || ""}
+                    onChange={(e) => onFormChange({ ...formData, challenges: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                    placeholder="Any challenges faced this week..."
+                    rows="2"
+                  ></textarea>
+                </div>
+              </>
+            )}
 
             {/* File Upload Field - Only for Weekly Reports */}
             {reportType === "weekly" && (
@@ -2612,7 +2870,7 @@ const ReportView = ({
                 <th className="px-6 py-4">Designation</th>
                 <th className="px-6 py-4">Submitted By</th>
                 <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Day</th>
+                {/* <th className="px-6 py-4">Day</th> */}
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
@@ -2655,9 +2913,9 @@ const ReportView = ({
                     <td className="px-6 py-4 text-slate-600">
                       {report.date ? (report.date.includes('-') && report.date.split('-').length === 3 ? report.date.split('-').reverse().join('/') : report.date) : 'N/A'}
                     </td>
-                    <td className="px-6 py-4 text-slate-500 italic">
+                    {/* <td className="px-6 py-4 text-slate-500 italic">
                       {report.day}
-                    </td>
+                    </td> */}
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-bold ${report.status === "Completed" ? "bg-green-100 text-green-700" :
                         report.status === "Pending" ? "bg-yellow-100 text-yellow-700" :

@@ -1,7 +1,8 @@
-//Admin Dashboard
+//Intern Head Dashboard
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { API_BASE_URL } from './config';
+import logo from '../static/NNlogo.jpeg';
 
 const Admin = () => {
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -31,34 +32,39 @@ const Admin = () => {
     });
     const [dashboardStats, setDashboardStats] = useState({ dailyProductivity: '--', weeklyActivity: '--' });
     const [editingData, setEditingData] = useState(null);
-
+    const [mentorsList, setMentorsList] = useState([]);
+    const [selectedReport, setSelectedReport] = useState(null);
 
     const handleLogout = async () => {
         try {
-            const username = currentUser.username || currentUser.name;
-            if (username) {
-                // Record logout activity
-                await fetch(`${API_BASE_URL}/activity`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        username: username,
-                        action: 'logout',
-                        app_url: 'Admin Dashboard'
-                    }),
-                });
+            if (!currentUser?.username) return;
 
-                await fetch(`${API_BASE_URL}/api/logout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ username: username }),
-                });
+            console.log("Logging out user:", currentUser.username);
+
+            // Call logout API FIRST
+            const response = await fetch(`${API_BASE_URL}/api/logout`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: currentUser.username
+                }),
+            });
+
+            const result = await response.json();
+            console.log("Logout API response:", result);
+
+            if (!response.ok) {
+                console.error("Logout failed on backend");
+                return;
             }
+
+            // Only after success, clear localStorage and navigate
+            localStorage.removeItem("currentUser");
+            navigate("/");
+
         } catch (error) {
             console.error("Logout failed:", error);
         }
-        localStorage.removeItem("currentUser");
-        navigate('/');
     };
 
     // Sidebar navigation handlers
@@ -151,24 +157,63 @@ const Admin = () => {
         }
     };
 
+    const fetchMentors = async () => {
+        try {
+            const [mRes, uRes] = await Promise.all([
+                fetch(`${API_BASE_URL}/api/admins?role=mentor`),
+                fetch(`${API_BASE_URL}/api/users`)
+            ]);
+            if (mRes.ok) {
+                const mentors = await mRes.json();
+                const allUsers = uRes.ok ? await uRes.json() : [];
+                // Attach assignedStudents count: users whose domain matches the mentor's domain
+                const mentorsWithCount = mentors.map(m => ({
+                    ...m,
+                    assignedStudents: allUsers.filter(u =>
+                        (u.domain || '').toLowerCase() === (m.domain || '').toLowerCase()
+                    ).length
+                }));
+                setMentorsList(mentorsWithCount);
+            }
+        } catch (err) {
+            console.warn('Failed to fetch mentors:', err);
+        }
+    };
+
     const fetchUsers = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/users`, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            if (response.ok) {
-                const data = await response.json();
-                const mentorDomain = currentUser.domain;
-                const adminRole = currentUser.role;
-                const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
-                
-                const filteredUsers = isSpecialDomain ? data : data.filter(u => (u.domain || u.Domain) === mentorDomain);
-                setUsersList(filteredUsers);
+            const [uRes, lRes] = await Promise.all([
+                fetch(`${API_BASE_URL}/api/users`),
+                fetch(`${API_BASE_URL}/api/logs`)
+            ]);
 
-                // Also update dashboard stats based on filtered users list
-                const activeUsers = filteredUsers.filter(u => u.status === 'Active').length;
-                const productivity = filteredUsers.length > 0 ? Math.round((activeUsers / filteredUsers.length) * 100) : 0;
+            if (uRes.ok && lRes.ok) {
+                const data = await uRes.json();
+                const allLogs = await lRes.json() || [];
+
+                // No domain filtering — show all users
+                const usersWithActivity = data.map(user => {
+                    // Find all logs for this specific user, sorted by newest first
+                    const userLogs = allLogs.filter(log => log.username?.trim().toLowerCase() === user.username?.trim().toLowerCase())
+                        .slice().reverse();
+
+                    // Find the latest record that has a login time
+                    const lastLoginLog = userLogs.find(log => log.login_time || (log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in'))));
+
+                    // Find the latest record that has a logout time
+                    const lastLogoutLog = userLogs.find(log => log.logout_time || (log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed'))));
+
+                    return {
+                        ...user,
+                        login_time: lastLoginLog ? (lastLoginLog.login_time || lastLoginLog.timestamp) : null,
+                        logout_time: lastLogoutLog ? (lastLogoutLog.logout_time || lastLogoutLog.timestamp) : null
+                    };
+                });
+
+                setUsersList(usersWithActivity);
+
+                const activeUsers = data.filter(u => u.status === 'Active').length;
+                const productivity = data.length > 0 ? Math.round((activeUsers / data.length) * 100) : 0;
                 setDashboardStats({
                     dailyProductivity: `${productivity}%`,
                     weeklyActivity: `${productivity}%`
@@ -197,23 +242,40 @@ const Admin = () => {
 
     const fetchDashboardData = async () => {
         try {
-            const [uRes, rRes, lRes, mRes] = await Promise.all([
+            const [uRes, rRes, lRes, mRes, mentorsRes] = await Promise.all([
                 fetch(`${API_BASE_URL}/api/users`),
                 fetch(`${API_BASE_URL}/api/daily-reports`),
                 fetch(`${API_BASE_URL}/api/logs`),
-                fetch(`${API_BASE_URL}/api/mentors/performance`)
+                fetch(`${API_BASE_URL}/api/mentors/performance`),
+                fetch(`${API_BASE_URL}/api/admins?role=mentor`)
             ]);
 
-            const mentorDomain = currentUser.domain;
-            const adminRole = currentUser.role;
-            const isSpecialDomain = !mentorDomain || mentorDomain === 'xyz' || mentorDomain === 'Admin' || mentorDomain === 'Super Admin' || mentorDomain === 'Management' || (adminRole && adminRole.toLowerCase().includes('super'));
-
-            if (uRes.ok) {
+            if (uRes.ok && lRes.ok) {
                 const users = await uRes.json();
-                const filteredUsers = isSpecialDomain ? users : users.filter(u => (u.domain || u.Domain) === mentorDomain);
-                setUsersList(filteredUsers);
-                const activeUsers = filteredUsers.filter(u => u.status === 'Active').length;
-                const productivity = filteredUsers.length > 0 ? Math.round((activeUsers / filteredUsers.length) * 100) : 0;
+                const allLogs = await lRes.json() || [];
+
+                // No domain filtering — show all users across all domains
+                const usersWithActivity = users.map(user => {
+                    // Find all logs for this specific user, sorted by newest first
+                    const userLogs = allLogs.filter(log => log.username?.trim().toLowerCase() === user.username?.trim().toLowerCase())
+                        .slice().reverse();
+
+                    // Find the latest record that has a login time
+                    const lastLoginLog = userLogs.find(log => log.login_time || (log.action && (log.action.toLowerCase().includes('login') || log.action.toLowerCase().includes('log in') || log.action.toLowerCase().includes('logged in'))));
+
+                    // Find the latest record that has a logout time
+                    const lastLogoutLog = userLogs.find(log => log.logout_time || (log.action && (log.action.toLowerCase().includes('logout') || log.action.toLowerCase().includes('log out') || log.action.toLowerCase().includes('logged out') || log.action.toLowerCase().includes('session completed'))));
+
+                    return {
+                        ...user,
+                        login_time: lastLoginLog ? (lastLoginLog.login_time || lastLoginLog.timestamp) : null,
+                        logout_time: lastLogoutLog ? (lastLogoutLog.logout_time || lastLogoutLog.timestamp) : null
+                    };
+                });
+
+                setUsersList(usersWithActivity);
+                const activeUsers = users.filter(u => u.status === 'Active').length;
+                const productivity = users.length > 0 ? Math.round((activeUsers / users.length) * 100) : 0;
                 setDashboardStats({
                     dailyProductivity: `${productivity}%`,
                     weeklyActivity: `${productivity}%`
@@ -221,15 +283,19 @@ const Admin = () => {
             }
             if (rRes.ok) {
                 const reports = await rRes.json();
-                setReportsData(isSpecialDomain ? reports : reports.filter(r => (r.domain || r.Domain) === mentorDomain));
+                setReportsData(reports); // All reports, no domain filter
             }
             if (lRes.ok) {
                 const logs = await lRes.json();
-                setLogsData(isSpecialDomain ? logs : logs.filter(l => (l.domain || l.Domain) === mentorDomain));
+                setLogsData(logs); // All logs, no domain filter
             }
             if (mRes.ok) {
                 const performance = await mRes.json();
-                setMentorPerformance(isSpecialDomain ? performance : performance.filter(m => (m.domain || m.Domain) === mentorDomain));
+                setMentorPerformance(performance); // All mentor performance, no domain filter
+            }
+            if (mentorsRes && mentorsRes.ok) {
+                const mentorsData = await mentorsRes.json();
+                setMentorsList(mentorsData);
             }
         } catch (err) {
             console.error("Failed to fetch dashboard data:", err);
@@ -290,6 +356,8 @@ const Admin = () => {
             setCurrentView('monitoring');
         } else if (path.endsWith('/mentors')) {
             setCurrentView('mentors');
+            fetchMentors();
+            pollingIntervalRef.current = setInterval(fetchMentors, 5000);
         } else if (path.endsWith('/logs')) {
             setCurrentView('logs');
             fetchLogs();
@@ -346,7 +414,7 @@ const Admin = () => {
             <aside className={`w-64 bg-white flex flex-col border-r border-slate-200 shrink-0 transition-transition duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-30 h-full`}>
                 {/* Brand */}
                 <div className="h-16 flex items-center px-6 bg-orange-500 text-white font-bold text-xl tracking-wide shadow-md z-10">
-                    <span className="mr-2">⚡</span> Admin
+                    <span className="mr-2">⚡</span> Intern Head
                 </div>
 
                 {/* User Card */}
@@ -494,7 +562,7 @@ const Admin = () => {
                                                 </div>
                                             </div>
                                             <div className="bg-white text-orange-600 font-bold px-3 py-1 rounded-lg">
-                                                {usersList.filter(u => u.role && u.role.toLowerCase().includes('mentor')).length}
+                                                {mentorsList.length}
                                             </div>
                                         </div>
                                     </div>
@@ -653,7 +721,8 @@ const Admin = () => {
                                     <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
                                         <tr>
                                             <th className="px-6 py-4 text-xs">ID</th>
-                                            <th className="px-6 py-4">User Details</th>
+                                            <th className="px-6 py-4">Username</th>
+                                            <th className="px-6 py-4">Email</th>
                                             <th className="px-6 py-4">Domain</th>
                                             <th className="px-6 py-4">Designation</th>
                                             <th className="px-6 py-4">Status</th>
@@ -663,44 +732,47 @@ const Admin = () => {
                                     <tbody className="divide-y divide-slate-100">
                                         {usersList.length === 0 ? (
                                             <tr>
-                                                <td colSpan="5" className="p-12 text-center text-slate-400">
+                                                <td colSpan="7" className="p-12 text-center text-slate-400">
                                                     No users found in the system.
                                                 </td>
                                             </tr>
                                         ) : (
                                             usersList.map((user) => (
                                                 <tr key={user.id} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="px-6 py-4 font-mono text-xs text-slate-500">{user.custom_id || user.id}</td>
-                                                    <td className="px-6 py-4">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold border border-orange-200 shadow-sm">
-                                                                {user.username.charAt(0).toUpperCase()}
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-bold text-slate-800">{user.username}</p>
-                                                                <p className="text-slate-400 text-xs">{user.email || 'no-email@system.com'}</p>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4">
-                                                        <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase">{user.domain}</span>
-                                                    </td>
-                                                    <td className="px-6 py-4 text-slate-600 font-medium">{user.designation}</td>
-                                                    <td className="px-6 py-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
-                                                            }`}>
-                                                            {user.status}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-6 py-4 text-right">
-                                                        <button
-                                                            onClick={() => { setEditingData(user); setCurrentView('create-user'); navigate('/admin/create-user'); }}
-                                                            className="text-orange-500 hover:text-orange-700 font-bold text-xs uppercase"
-                                                        >
-                                                            Edit
-                                                        </button>
-                                                    </td>
-                                                </tr>
+                                                     <td className="px-6 py-4 text-slate-500 font-mono text-xs">{user.custom_id || user.id}</td>
+                                                     <td className="px-6 py-4">
+                                                         <div className="flex items-center gap-3">
+                                                             <div className="w-9 h-9 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-sm shrink-0">
+                                                                 {(user.username || 'U').charAt(0).toUpperCase()}
+                                                             </div>
+                                                             <div>
+                                                                 <p className="font-bold text-slate-800 whitespace-nowrap">{user.username}</p>
+                                                             </div>
+                                                         </div>
+                                                     </td>
+                                                     <td className="px-6 py-4 text-slate-600 text-sm">{user.email || 'No email'}</td>
+                                                     <td className="px-6 py-4">
+                                                         <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase">{user.domain || 'N/A'}</span>
+                                                     </td>
+                                                     <td className="px-6 py-4">
+                                                         <span className="font-bold text-slate-700 text-sm">{user.designation || 'N/A'}</span>
+                                                     </td>
+                                                     <td className="px-6 py-4">
+                                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                             {user.status === 'Active' ? 'Online' : 'Offline'}
+                                                         </span>
+                                                     </td>
+                                                     <td className="px-6 py-4 text-right">
+                                                         <div className="flex items-center justify-end gap-2">
+                                                             <button className="text-blue-600 hover:text-blue-800 font-medium text-xs px-3 py-1 bg-blue-50 rounded hover:bg-blue-100 transition-colors">
+                                                                 Edit
+                                                             </button>
+                                                             <button className="text-red-500 hover:text-red-700 font-medium text-xs px-3 py-1 bg-red-50 rounded hover:bg-red-100 transition-colors">
+                                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                             </button>
+                                                         </div>
+                                                     </td>
+                                                 </tr>
                                             ))
                                         )}
                                     </tbody>
@@ -736,24 +808,24 @@ const Admin = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {usersList.filter(u => u.role && u.role.toLowerCase().includes('mentor')).length === 0 ? (
+                                        {mentorsList.length === 0 ? (
                                             <tr>
                                                 <td colSpan="6" className="p-12 text-center text-slate-400">
                                                     No mentors found.
                                                 </td>
                                             </tr>
                                         ) : (
-                                            usersList.filter(u => u.role && u.role.toLowerCase().includes('mentor')).map((user) => (
-                                                <tr key={user.id} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="px-6 py-4 font-bold text-slate-800">{user.username}</td>
-                                                    <td className="px-6 py-4 text-slate-600">{user.domain}</td>
-                                                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{user.custom_id || user.id}</td>
+                                            mentorsList.map((mentor) => (
+                                                <tr key={mentor.id} className="hover:bg-slate-50 transition-colors">
+                                                    <td className="px-6 py-4 font-bold text-slate-800">{mentor.username}</td>
+                                                    <td className="px-6 py-4 text-slate-600">{mentor.domain}</td>
+                                                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{mentor.custom_id || mentor.id}</td>
                                                     <td className="px-6 py-4 font-semibold text-slate-700">
-                                                        {usersList.filter(u => u.domain === user.domain && u.id !== user.id).length}
+                                                        {usersList.filter(u => u.domain === mentor.domain && u.id !== mentor.id).length}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                            {user.status === 'Active' ? 'Online' : 'Offline'}
+                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${mentor.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                            {mentor.status === 'Active' ? 'Online' : 'Offline'}
                                                         </span>
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
@@ -904,15 +976,7 @@ const Admin = () => {
                                             logsData.map((log) => (
                                                 <LogStartRow
                                                     key={log.id}
-                                                    id={log.id}
-                                                    date={log.timestamp ? new Date(log.timestamp).toLocaleDateString('en-GB') : 'N/A'}
-                                                    time={log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'N/A'}
-                                                    username={log.username}
-                                                    designation={log.designation}
-                                                    email={log.email}
-                                                    domain={log.domain || 'System'}
-                                                    role={log.role || 'User'}
-                                                    action={log.action}
+                                                    {...log}
                                                 />
                                             ))
                                         )}
@@ -996,7 +1060,7 @@ const Admin = () => {
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
                                                         <button
-                                                            onClick={() => alert(`Content: ${report.reportContent || 'No content provided'}`)}
+                                                            onClick={() => setSelectedReport(report)}
                                                             className="text-orange-500 hover:text-orange-700 font-bold text-xs"
                                                         >
                                                             VIEW DETAILS
@@ -1009,6 +1073,13 @@ const Admin = () => {
                                 </table>
                             </div>
                         </div>
+                    )}
+
+                    {selectedReport && (
+                        <WeeklyReportDetailsModal 
+                            report={selectedReport} 
+                            onClose={() => setSelectedReport(null)} 
+                        />
                     )}
 
                 </main>
@@ -1381,6 +1452,180 @@ const CreateUserForm = ({ onViewList, initialData }) => {
     );
 };
 
+// Weekly Report Details Modal matching requested format
+const WeeklyReportDetailsModal = ({ report, onClose }) => {
+    if (!report) return null;
 
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+
+    let parsedTasks = null;
+    try {
+        if (report.reportContent && report.reportContent.startsWith('[')) {
+            parsedTasks = JSON.parse(report.reportContent);
+        }
+    } catch (e) {
+        console.error("Failed to parse weekly tasks");
+    }
+
+    // Default fallback mapping if not JSON
+    const reportDataMappings = parsedTasks || [1, 2, 3, 4, 5, 6].map((dayCode) => ({
+         day: dayCode,
+         dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayCode-1],
+         date: 'dd/mm/yy',
+         tasks: dayCode === 1 ? report.reportContent : "Task 1: \nTask 2: \nTask 3: "
+    }));
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-2xl rounded-xl relative flex flex-col my-8 origin-top scale-95 animate-in zoom-in-95 duration-300">
+                
+                {/* Header - Non Printable Actions */}
+                <div className="flex justify-between items-center p-4 border-b border-slate-100 sticky top-0 bg-white/80 backdrop-blur-md z-20 print:hidden rounded-t-xl">
+                    <div className="flex items-center gap-2">
+                        <img src={logo} alt="Novanectar Logo" className="h-8" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-slate-800">Report Preview</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => window.print()}
+                            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-semibold shadow-md shadow-blue-200"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print Report
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-all font-bold"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg> Back
+                        </button>
+                    </div>
+                </div>
+
+                {/* Paper Container - Specific Image Format */}
+                <div className="flex-1 p-[20mm] bg-white print:p-0 text-slate-800 text-sm font-sans mx-auto w-full max-w-[190mm]">
+                    
+                    {/* Header Image */}
+                    <div className="flex justify-center mb-6 mt-4">
+                        <img src={logo} alt="Novanectar Logo" className="h-16 object-contain" />
+                    </div>
+
+                    <h1 className="text-center text-2xl font-normal mb-8 text-black">
+                        Weekly Report Year ({currentYear})
+                    </h1>
+
+                    {/* Report Information Grid */}
+                    <div className="space-y-4 mb-6">
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Name:</span> <span className="flex-1">{report.name || report.createdBy}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Position:</span> <span className="flex-1">{report.designation}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Project Name:</span> <span className="flex-1">{report.title || report.projectName}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Contact No:</span> <span className="flex-1">{report.mobileNumber || "N/A"}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Mail:</span> <span className="flex-1">{report.email || "N/A"}</span></div>
+                        <div className="flex"><span className="font-semibold w-40 shrink-0">Project Name:</span> <span className="flex-1">{report.title || report.projectName}</span></div>
+                    </div>
+
+                    {/* Introduction */}
+                    <div className="mb-6">
+                        <h2 className="font-bold mb-2">Introduction:</h2>
+                        <p className="text-justify mb-4">
+                            This report provides a comprehensive overview of the activities, performance, and
+                            progress for the Week of <span className="font-semibold px-2 border-b border-black">{currentMonth}</span>, {currentYear}. It highlights key achievements,
+                            challenges faced, and areas for improvement while analyzing key performance indicators
+                            (KPIs) relevant to our operations.
+                        </p>
+                        <p className="text-justify mb-6">
+                            The purpose of this report is to assess our monthly performance against set goals,
+                            ensure transparency in operations, and facilitate data-driven decision-making.
+                            Additionally, it outlines strategic plans for the upcoming month to enhance efficiency
+                            and productivity.
+                        </p>
+                    </div>
+
+                    {/* Executive Summary Table */}
+                    <div className="mb-6">
+                        <h2 className="font-bold mb-2">Executive Summary:</h2>
+                        <div className="border border-black flex flex-col">
+                            <div className="grid grid-cols-2 border-b border-black font-semibold text-[13px]">
+                                <div className="p-2 border-r border-black">WEEKS/ DATES</div>
+                                <div className="p-2">PROJECTS/TASKS (Time Slot)</div>
+                            </div>
+                            
+                            {reportDataMappings.map((taskItem, index) => {
+                                return (
+                                    <div key={index} className={`grid grid-cols-2 text-[13px] ${index < 5 ? 'border-b border-black' : ''}`}>
+                                        <div className="p-2 border-r border-black text-slate-700 min-w-0">
+                                            Day {taskItem.day}, Date: {taskItem.date || 'dd/mm/yy'} ({taskItem.dayName})
+                                        </div>
+                                        <div className="p-2 whitespace-pre-wrap break-words min-w-0">
+                                            {taskItem.tasks ? (
+                                                <div className="italic text-blue-900 font-medium break-words">{taskItem.tasks}</div>
+                                            ) : (
+                                                <>
+                                                    <div>Task 1:</div>
+                                                    <div>Task 2:</div>
+                                                    <div>Task 3:</div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Future Aims */}
+                    <div className="mb-6 mt-8">
+                         <h2 className="font-bold mb-2">Future Aims:</h2>
+                         <div className="grid grid-cols-2 items-stretch min-h-[40px] border border-black text-[13px]">
+                             <div className="p-2 font-semibold min-w-0">Aim 1:</div>
+                             <div className="border-l border-black p-2 whitespace-pre-wrap break-words min-w-0 flex items-center">
+                                 {report.weeklySummary || ''}
+                             </div>
+                         </div>
+                    </div>
+
+                    {/* Challenges */}
+                    <div className="mb-10">
+                         <h2 className="font-bold mb-2">Challenges:</h2>
+                         <div className="min-h-[40px] whitespace-pre-wrap break-words text-[13px]">
+                            {report.challenges || ''}
+                         </div>
+                    </div>
+
+                    {/* Conclusion & Signatures */}
+                    <div className="mt-8 mb-4">
+                        <h2 className="font-bold mb-[80px]">Conclusion:</h2>
+                        
+                        <div className="grid grid-cols-3 gap-6 text-[13px]">
+                            <div className="text-left font-semibold">Mentore Sign</div>
+                            <div className="text-center font-semibold">Department Approved Signature</div>
+                            <div className="text-right font-semibold">HR Department Signature</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Global CSS for Print */}
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                @media print {
+                  body * { visibility: hidden; }
+                  .print\\:hidden { display: none !important; }
+                  .fixed { position: static !important; }
+                  .inset-0 { position: static !important; }
+                  .bg-white { background: transparent !important; }
+                  .shadow-2xl { box-shadow: none !important; }
+                  .p-4 { padding: 0 !important; }
+                  .bg-slate-900\\/60 { background: transparent !important; }
+                  .modal-container, .modal-container * { visibility: visible; }
+                  .modal-container { position: absolute; left: 0; top: 0; width: 100%; }
+                  @page { margin: 0; size: auto; }
+                }
+            `}} />
+        </div>
+    );
+};
 
 export default Admin;
