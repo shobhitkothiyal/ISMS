@@ -7,7 +7,7 @@ class Config:
     
     # Database Configuration
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL") or \
-        'mysql+mysqlconnector://root:2003@localhost/isms_db'
+        'mysql+mysqlconnector://admin:ZLwDR01PKKvO9cd6B6iJ@isms1.c29e48ws2cbo.us-east-1.rds.amazonaws.com/isms1'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Storage Configuration

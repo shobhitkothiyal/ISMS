@@ -6,12 +6,12 @@ def create_database():
         # Try connecting with default 'root' password
         mydb = mysql.connector.connect(
             host="localhost",
-            user="root",
-            password="2003"
+            user="admin",
+            password="ZLwDR01PKKvO9cd6B6iJ"
         )
         cursor = mydb.cursor()
-        cursor.execute("CREATE DATABASE IF NOT EXISTS isms_db")
-        print("Database 'isms_db' created successfully!")
+        cursor.execute("CREATE DATABASE IF NOT EXISTS isms1")
+        print("Database 'isms1' created successfully!")
     except mysql.connector.Error as err:
         print(f"Error: {err}")
         print("\nCould not connect with password 'root'.")
