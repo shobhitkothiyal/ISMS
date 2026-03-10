@@ -203,7 +203,7 @@ const Admin = () => {
 
                 setUsersList(usersWithActivity);
 
-                const activeUsers = data.filter(u => u.status === 'Active').length;
+                const activeUsers = data.filter(u => u.status === 'Online').length;
                 const productivity = data.length > 0 ? Math.round((activeUsers / data.length) * 100) : 0;
                 setDashboardStats({
                     dailyProductivity: `${productivity}%`,
@@ -265,7 +265,7 @@ const Admin = () => {
                 });
 
                 setUsersList(usersWithActivity);
-                const activeUsers = users.filter(u => u.status === 'Active').length;
+                const activeUsers = users.filter(u => u.status === 'Online').length;
                 const productivity = users.length > 0 ? Math.round((activeUsers / users.length) * 100) : 0;
                 setDashboardStats({
                     dailyProductivity: `${productivity}%`,
@@ -791,8 +791,8 @@ const Admin = () => {
                                                          <span className="font-bold text-slate-700 text-sm">{user.designation || 'N/A'}</span>
                                                      </td>
                                                      <td className="px-6 py-4">
-                                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                             {user.status === 'Active' ? 'Online' : 'Offline'}
+                                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${user.status === 'Online' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                             {user.status === 'Online' ? 'Online' : 'Offline'}
                                                          </span>
                                                      </td>
                                                      <td className="px-6 py-4 text-right">
@@ -857,8 +857,8 @@ const Admin = () => {
                                                         {usersList.filter(u => u.domain === mentor.domain && u.id !== mentor.id).length}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${mentor.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                            {mentor.status === 'Active' ? 'Online' : 'Offline'}
+                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${mentor.status === 'Online' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                            {mentor.status === 'Online' ? 'Online' : 'Offline'}
                                                         </span>
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
@@ -919,12 +919,12 @@ const Admin = () => {
                                                     <td className="px-6 py-4 font-bold text-slate-800">{domain}</td>
                                                     <td className="px-6 py-4">
                                                         <div className="flex flex-col gap-1">
-                                                            {usersList.filter(u => u.domain === domain && u.status === 'Active').map(u => (
+                                                            {usersList.filter(u => u.domain === domain && u.status === 'Online').map(u => (
                                                                 <span key={u.id} className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded inline-block w-fit">
                                                                     {u.username} <span className="text-slate-400">({u.custom_id || u.id})</span>
                                                                 </span>
                                                             ))}
-                                                            {usersList.filter(u => u.domain === domain && u.status === 'Active').length === 0 && (
+                                                            {usersList.filter(u => u.domain === domain && u.status === 'Online').length === 0 && (
                                                                 <span className="text-slate-400 italic text-xs">No active users</span>
                                                             )}
                                                         </div>

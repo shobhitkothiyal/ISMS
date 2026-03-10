@@ -192,7 +192,7 @@ const SubAdmin = () => {
                 setUsersList(usersWithActivity);
 
                 if (mentorDomain && mentorDomain !== 'Domain Mentor') {
-                    const activeCount = domainUsers.filter(u => u.status === 'Active').length;
+                    const activeCount = domainUsers.filter(u => u.status === 'Online').length;
                     const activityPercentage = domainUsers.length > 0 ? Math.round((activeCount / domainUsers.length) * 100) : 0;
 
                     setDomainStats({
@@ -664,7 +664,7 @@ const SubAdmin = () => {
                                                         domain={user.domain || user.Domain || 'No domain'}
                                                         loginTime={user.login_time}
                                                         logoutTime={user.logout_time}
-                                                        status={user.status === 'Active' ? 'online' : 'offline'}
+                                                        status={user.status === 'Online' ? 'online' : 'offline'}
                                                     />
                                                 ))
                                             )}
@@ -769,7 +769,7 @@ const SubAdmin = () => {
                                                     <td className="px-6 py-4 text-slate-600 font-medium">{user.designation}</td>
                                                     <td className="px-6 py-4 text-slate-500 font-medium">{user.domain}</td>
                                                     <td className="px-6 py-4 text-center">
-                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-800'}`}>
+                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.status === 'Online' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-800'}`}>
                                                             {user.status}
                                                         </span>
                                                     </td>

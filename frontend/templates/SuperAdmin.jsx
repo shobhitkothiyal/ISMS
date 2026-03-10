@@ -4,6 +4,66 @@ import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { API_BASE_URL } from "./config";
 import logo from "../static/NNlogo.jpeg";
 
+// ────────────────────────────────────────────────
+//           DATE / TIME FORMATTING HELPERS
+// ────────────────────────────────────────────────
+
+function formatIndianDateTime(value) {
+  if (!value || value === 'NULL' || value.trim() === '') return "—";
+
+  try {
+    let normalized = value.trim();
+
+    // Replace space with T if it's date time with space (common DB format)
+    if (normalized.includes(' ') && !normalized.includes('T')) {
+      normalized = normalized.replace(' ', 'T');
+    }
+
+    // If no timezone → assume it's IST and append offset
+    if (!normalized.includes('Z') && !normalized.includes('+') && !normalized.includes('-', 10)) {
+      normalized += '+05:30';
+    }
+
+    const date = new Date(normalized);
+
+    if (isNaN(date.getTime())) {
+      console.warn("Parse failed even after normalize:", value, "→", normalized);
+      return "Invalid date";
+    }
+
+    return date.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      hour12: false
+    });
+  } catch (err) {
+    console.warn("Date format error:", value, err);
+    return "Invalid date";
+  }
+}
+
+function formatIndianDateOnly(value) {
+  if (!value || value === 'NULL' || value.trim() === '') return "—";
+
+  try {
+    let dateStr = value.trim().split(/\s+/)[0]; // take only YYYY-MM-DD part
+
+    const date = new Date(dateStr);
+
+    if (isNaN(date.getTime())) return "—";
+
+    return date.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch {
+    return "—";
+  }
+}
+
 const SuperAdmin = () => {
   const location = useLocation();
   const [activeView, setActiveView] = useState("dashboard");
@@ -69,7 +129,7 @@ const SuperAdmin = () => {
     });
 
     if (response.ok) {
-      console.log("Logout recorded successfully");
+      console.log("Logout  successfully");
     }
   } catch (error) {
     console.error("Error recording logout:", error);
@@ -158,7 +218,7 @@ const SuperAdmin = () => {
 
         setMonthlyReportData(filteredUsers);
         setLogsData(filteredLogs);
-        const activeEmployees = filteredUsers.filter((e) => e.status === "Active").length;
+        const activeEmployees = filteredUsers.filter((e) => e.status === "Online").length;
         const avgActivity = filteredUsers.length > 0
           ? Math.round((activeEmployees / filteredUsers.length) * 100)
           : 0;
@@ -823,10 +883,10 @@ const SuperAdmin = () => {
                                   <td className="px-4 py-3 font-medium text-slate-800 w-full whitespace-nowrap">{user.username}</td>
                                   <td className="px-4 py-3 text-slate-600">{user.employmentType || user.role || 'N/A'}</td>
                                   <td className="px-4 py-3 text-slate-600">{user.domain || 'N/A'}</td>
-                                  <td className="px-4 py-3 text-slate-600">{user.status === 'Active' ? Math.floor(Math.random() * (100 - 70 + 1) + 70) : 0}</td>
-                                  <td className="px-4 py-3 text-slate-600">{user.status === 'Active' ? Math.floor(Math.random() * (100 - 80 + 1) + 80) : 0}%</td>
+                                  <td className="px-4 py-3 text-slate-600">{user.status === 'Online' ? Math.floor(Math.random() * (100 - 70 + 1) + 70) : 0}</td>
+                                  <td className="px-4 py-3 text-slate-600">{user.status === 'Online' ? Math.floor(Math.random() * (100 - 80 + 1) + 80) : 0}%</td>
                                   <td className="px-4 py-3">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.status === 'Online' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
                                       {user.status}
                                     </span>
                                   </td>
@@ -870,7 +930,7 @@ const SuperAdmin = () => {
                     <tbody className="divide-y divide-slate-100 italic">
                       {logsData.length === 0 ? (
                         <tr>
-                          <td colSpan="9" className="px-6 py-10 text-center text-slate-400 text-sm">
+                          <td colSpan="11" className="px-6 py-10 text-center text-slate-400 text-sm">
                             No recent log activities recorded.
                           </td>
                         </tr>
@@ -1002,7 +1062,7 @@ const SuperAdmin = () => {
                   <tbody className="divide-y divide-slate-100">
                     {logsData.length === 0 ? (
                       <tr>
-                        <td colSpan="10" className="p-12 text-center text-slate-400 italic">
+                        <td colSpan="11" className="p-12 text-center text-slate-400 italic">
                           No audit logs found.
                         </td>
                       </tr>
@@ -1272,6 +1332,7 @@ const CreateUserForm = ({ onViewList, initialData }) => {
     role: "User",
     Domain: "",
     designation: "",
+    status: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1285,6 +1346,7 @@ const CreateUserForm = ({ onViewList, initialData }) => {
         role: initialData.role || "User",
         Domain: initialData.domain || initialData.Domain || "",
         designation: initialData.designation || "",
+        status: initialData.status || "Offline",
       });
     } else {
       setFormData({
@@ -1295,7 +1357,7 @@ const CreateUserForm = ({ onViewList, initialData }) => {
         role: "User",
         Domain: "",
         designation: "",
-
+        status: "Offline",
       });
     }
   }, [initialData]);
@@ -1736,9 +1798,10 @@ const UserRow = ({ userId, name, email, role, domain, designation, status, onEdi
     <td className="px-6 py-4 text-slate-600 text-sm min-w-50">{domain}</td>
     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{designation}</td>
     <td className="px-6 py-4">
-      <div className={`flex items-center gap-2 px-2 py-1 rounded-md w-fit ${status === "Active" ? "bg-green-50 text-green-700 border border-green-100" : "bg-slate-50 text-slate-600 border border-slate-100"}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${status === "Active" ? "bg-green-500" : "bg-slate-400"}`}></span>
-        <span className="text-xs font-bold">{status}</span>
+      <div className={`flex items-center gap-2 px-2 py-1 rounded-md w-fit ${status === "Online" ? "bg-green-50 text-green-700 border border-green-100" : "bg-slate-50 text-slate-600 border border-slate-100"}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${status === 'Online' ? "bg-green-500" : "bg-slate-400"}`}></span>
+        <span className="text-xs font-bold">{status === 'Online' ? 'Online' : 'Offline'}</span>
+        <span className="text-xs font-bold">{status === 'Online' ? 'Online' : 'Offline'}</span>
       </div>
     </td>
     <td className="px-6 py-4 text-right">
@@ -1783,8 +1846,8 @@ const AdminRow = ({ userId, name, role, designation, domain, status, email, onEd
     <td className="px-6 py-4 text-slate-600 text-sm min-w-50">{domain}</td>
     <td className="px-6 py-4 text-slate-600 text-sm">{designation}</td>
     <td className="px-6 py-4">
-      <div className={`flex items-center gap-2 px-2 py-1 rounded-md w-fit ${status === "Active" ? "bg-green-50 text-green-700 border border-green-100" : "bg-slate-50 text-slate-600 border border-slate-100"}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${status === "Active" ? "bg-green-500" : "bg-slate-400"}`}></span>
+      <div className={`flex items-center gap-2 px-2 py-1 rounded-md w-fit ${status === "Online" ? "bg-green-50 text-green-700 border border-green-100" : "bg-slate-50 text-slate-600 border border-slate-100"}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${status === "Online" ? "bg-green-500" : "bg-slate-400"}`}></span>
         <span className="text-xs font-bold">{status}</span>
       </div>
     </td>
@@ -1811,39 +1874,42 @@ const AdminRow = ({ userId, name, role, designation, domain, status, email, onEd
   </tr>
 );
 
-// Logs And Audit Row 
-const LogAuditRow = ({ id, timestamp, login_time, logout_time, username, designation, email, domain, role, action }) => {
-  const isLogin = action && (action.toLowerCase().includes('login') || action.toLowerCase().includes('log in') || action.toLowerCase().includes('logged in'));
-  const isLogout = action && (action.toLowerCase().includes('logout') || action.toLowerCase().includes('log out') || action.toLowerCase().includes('logged out') || action.toLowerCase().includes('session completed'));
-  
-  // Determine status based on action
-  const status = isLogin ? 'Online' : isLogout ? 'Offline' : 'Pending';
-  
-  // Use logout_time field if available, otherwise fallback to timestamp if it's a logout action
-  const loginTimeValue = login_time || (!isLogout ? timestamp : null);
-  const logoutTimeValue = logout_time || (isLogout ? timestamp : null);
+// Log Audit Row Component
 
-  const formatDateTime = (dateTimeString) => {
-    if (!dateTimeString) return null;
-    const date = new Date(dateTimeString);
-    return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-    });
-  };
+const LogAuditRow = ({
+  id,
+  timestamp,         // fallback if login/logout missing
+  login_time,
+  logout_time,
+  username,
+  designation,
+  email,
+  domain,
+  role,
+  action,
+}) => {
+  // Prefer specific fields, fallback to timestamp
+  const loginValue  = login_time  || (action?.toLowerCase().includes('login')  ? timestamp : null);
+  const logoutValue = logout_time || (action?.toLowerCase().includes('logout') ? timestamp : null);
 
-  const displayLoginTime = loginTimeValue ? formatDateTime(loginTimeValue) : null;
-  const displayLogoutTime = logoutTimeValue ? formatDateTime(logoutTimeValue) : null;
-  const displayDate = (loginTimeValue || logoutTimeValue) ? new Date(loginTimeValue || logoutTimeValue).toLocaleDateString('en-GB') : 'N/A';
+  const displayDate = loginValue || logoutValue
+    ? formatIndianDateOnly(loginValue || logoutValue)
+    : "—";
+
+  const displayLoginTime  = loginValue  ? formatIndianDateTime(loginValue)  : null;
+  const displayLogoutTime = logoutValue ? formatIndianDateTime(logoutValue) : null;
+
+  const isLogin   = action?.toLowerCase().includes('login')  || action?.toLowerCase().includes('logged in');
+  const isLogout  = action?.toLowerCase().includes('logout') || action?.toLowerCase().includes('logged out');
+  const status    = isLogin ? 'Online' : isLogout ? 'Offline' : 'Pending';
 
   return (
     <tr className="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0 group">
-      <td className="px-6 py-4 font-mono text-xs text-slate-400 group-hover:text-slate-600 transition-colors">#{id}</td>
+      <td className="px-6 py-4 font-mono text-xs text-slate-400 group-hover:text-slate-600 transition-colors">
+        #{id}
+      </td>
       <td className="px-6 py-4 text-sm text-slate-600">{displayDate}</td>
+
       <td className="px-6 py-4">
         {displayLoginTime ? (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 text-xs font-bold border border-green-100 whitespace-nowrap">
@@ -1851,9 +1917,10 @@ const LogAuditRow = ({ id, timestamp, login_time, logout_time, username, designa
             {displayLoginTime}
           </span>
         ) : (
-          <span className="text-slate-300 text-xs">-</span>
+          <span className="text-slate-300 text-xs">—</span>
         )}
       </td>
+
       <td className="px-6 py-4">
         {displayLogoutTime ? (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 text-xs font-bold border border-red-100 whitespace-nowrap">
@@ -1861,9 +1928,10 @@ const LogAuditRow = ({ id, timestamp, login_time, logout_time, username, designa
             {displayLogoutTime}
           </span>
         ) : (
-          <span className="text-slate-300 text-xs">-</span>
+          <span className="text-slate-300 text-xs">—</span>
         )}
       </td>
+
       <td className="px-6 py-4">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 uppercase border border-slate-200">
@@ -1872,19 +1940,27 @@ const LogAuditRow = ({ id, timestamp, login_time, logout_time, username, designa
           <span className="font-bold text-slate-800 text-xs whitespace-nowrap">{username || 'N/A'}</span>
         </div>
       </td>
+
       <td className="px-6 py-4 text-slate-600 text-xs font-medium">{designation || 'N/A'}</td>
-      <td className="px-6 py-4 text-slate-500 text-xs">{email}</td>
+
+      <td className="px-6 py-4 text-slate-500 text-xs">{email || '—'}</td>
+
       <td className="px-6 py-4">
-        <span className="text-slate-600 text-xs font-medium bg-slate-50 px-2 py-1 rounded border border-slate-100 whitespace-nowrap">{domain}</span>
-      </td>
-      <td className="px-6 py-4">
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${(role || '').toLowerCase().includes('super') ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
-          (role || '').toLowerCase().includes('admin') ? 'bg-blue-50 text-blue-700 border-blue-100' :
-            'bg-slate-50 text-slate-600 border-slate-100'
-          }`}>
-          {role}
+        <span className="text-slate-600 text-xs font-medium bg-slate-50 px-2 py-1 rounded border border-slate-100 whitespace-nowrap">
+          {domain || '—'}
         </span>
       </td>
+
+      <td className="px-6 py-4">
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${
+          (role || '').toLowerCase().includes('super') ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
+          (role || '').toLowerCase().includes('admin') ? 'bg-blue-50 text-blue-700 border-blue-100' :
+          'bg-slate-50 text-slate-600 border-slate-100'
+        }`}>
+          {role || '—'}
+        </span>
+      </td>
+
       <td className="px-6 py-4">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold border whitespace-nowrap ${
           status === 'Online' ? 'bg-green-50 text-green-700 border-green-100' :
@@ -1899,15 +1975,15 @@ const LogAuditRow = ({ id, timestamp, login_time, logout_time, username, designa
           {status}
         </span>
       </td>
+
       <td className="px-6 py-4">
         <span className="text-slate-700 text-xs font-semibold bg-slate-100 px-2 py-1 rounded border border-slate-200 whitespace-nowrap">
-          {action}
+          {action || '—'}
         </span>
       </td>
     </tr>
   );
 };
-
 // Helper to capitalize first letter of each word
 const toTitleCase = (str) => {
   if (!str) return "";
