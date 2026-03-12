@@ -132,7 +132,7 @@ def login():
             email=admin.email,
             action="Admin Login",
             status="Online",
-            login_time=datetime.datetime.now()
+            login_time=datetime.datetime.now().isoformat()
         )
         db.session.add(new_log)
         db.session.commit()
@@ -162,7 +162,7 @@ def logout():
         last_log = Log.query.filter_by(username=username, logout_time=None).order_by(Log.login_time.desc()).first()
         
         if last_log:
-            last_log.logout_time = datetime.datetime.now()
+            last_log.logout_time = datetime.datetime.now().isoformat()
             last_log.status = "Offline"
             last_log.action = "Admin Session Completed"
 
