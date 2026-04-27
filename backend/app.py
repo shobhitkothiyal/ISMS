@@ -11,31 +11,52 @@ def _create_database_if_not_exists(app_config):
     """Creates the database specified in the SQLAlchemy URI if it doesn't exist."""
     try:
         db_uri = app_config['SQLALCHEMY_DATABASE_URI']
-        # Skip database creation check if not using MySQL (e.g., if using SQLite)
+
+        # Skip if not MySQL
         if not db_uri or not db_uri.startswith('mysql'):
             return
 
-        parsed_uri = urlparse(db_uri)
+        # ✅ FIX: urlparse can't handle 'mysql+mysqlconnector://' scheme
+        # Strip the driver part so it becomes 'mysql://' which urlparse understands
+        parse_uri = db_uri.replace('mysql+mysqlconnector://', 'mysql://') \
+                          .replace('mysql+pymysql://', 'mysql://') \
+                          .replace('mysql+mysqldb://', 'mysql://')
+
+        parsed_uri = urlparse(parse_uri)
+
         db_name = parsed_uri.path.lstrip('/')
-        
-        # Connect to MySQL server (without specifying a database)
+        host = parsed_uri.hostname
+        user = parsed_uri.username
+        password = parsed_uri.password
+        port = parsed_uri.port or 3306
+
+        print(f"🔍 Connecting to MySQL at {host}:{port} as '{user}'...")
+
         mydb = mysql.connector.connect(
-            host=parsed_uri.hostname,
-            user=parsed_uri.username,
-            password=parsed_uri.password,
-            port=parsed_uri.port or 3306
+            host=host,
+            user=user,
+            password=password,
+            port=port
         )
         cursor = mydb.cursor()
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}`")
+        cursor.close()
+        mydb.close()
         print(f"✅ Database '{db_name}' verified/created.")
+
     except mysql.connector.Error as err:
         print(f"❌ Database creation/verification failed: {err}")
-        # Exit if we can't ensure the database exists, as the app will fail anyway.
+        print(f"   Host: {host}, User: {user}")
+        print("   👉 Check your DB_HOST, DB_USER, DB_PASSWORD in config.py or environment variables.")
         exit(1)
+
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    # ✅ Create/verify DB BEFORE db.init_app() tries to connect
+    _create_database_if_not_exists(app.config)
 
     # Initialize Extensions
     CORS(app, supports_credentials=True)
@@ -68,29 +89,23 @@ def create_app(config_class=Config):
 
     return app
 
+
 app = create_app()
 
 if __name__ == "__main__":
-    # Ensure the database exists before the app tries to connect to it.
-    _create_database_if_not_exists(app.config)
-
     with app.app_context():
-        # CAUTION: Ensure db.drop_all() is NOT called here. It deletes all data on restart.
-        # db.drop_all() 
-        # This will create tables if they don't exist based on models
         db.create_all()
         print("✅ Database Tables Verified/Created")
 
-        # Automatic Seeding
         from models import Admin
         super_admin = Admin.query.filter_by(username="superadmin").first()
-        
+
         if not super_admin:
             print("🌱 Seeding default Superadmin...")
             super_admin = Admin(
-                username="superadmin", 
-                email="superadmin@isms.com", 
-                role="superadmin", 
+                username="superadmin",
+                email="superadmin@isms.com",
+                role="superadmin",
                 status="Offline",
                 custom_id="SA/IN/24/0001",
                 domain="Management",
@@ -101,12 +116,11 @@ if __name__ == "__main__":
             db.session.commit()
             print("✅ Default Superadmin Created")
         else:
-            # Update existing superadmin to ensure designation/domain exists
             if super_admin.designation != "HR Head" or super_admin.domain != "Management":
                 print("🔄 Updating Superadmin details...")
                 super_admin.designation = "HR Head"
                 super_admin.domain = "Management"
                 db.session.commit()
                 print("✅ Superadmin details updated")
-    
+
     app.run(host="0.0.0.0", port=5000, debug=Config.DEBUG)
